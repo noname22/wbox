@@ -9,6 +9,6 @@
 
 extern void dma_init(void);
 extern void dma_reset(void);
-extern void dma_set_at(int is286);
+extern void dma_set_at(int at_mode);
 
 #endif /* WBOX_DMA_H */

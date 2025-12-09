@@ -502,10 +502,6 @@ extern cpu_family_t              *cpu_f;
 extern CPU                       *cpu_s;
 extern int                        cpu_override;
 
-extern int    cpu_isintel;
-extern int    cpu_iscyrix;
-extern int    cpu_16bitbus;
-extern int    cpu_64bitbus;
 extern int    cpu_pci_speed;
 extern int    cpu_multi;
 extern double cpu_dmulti;
@@ -515,26 +511,7 @@ extern int    cpu_cyrix_alignment; /* Cyrix 5x86/6x86 only has data misalignment
                                       penalties when crossing 8-byte boundaries. */
 extern int    cpu_cpurst_on_sr;    /* SiS 551x and 5571: Issue CPURST on soft reset. */
 
-extern int is8086;
-extern int is186;
-extern int is286;
-extern int is386;
-extern int is6117;
-extern int is486;
-extern int is586;
-extern int is_am486;
-extern int is_am486dxl;
-extern int is_pentium;
-extern int is_k5;
-extern int is_k6;
-extern int is_p6;
-extern int is_cxsmm;
-extern int hascache;
-extern int isibm486;
-extern int is_mazovia;
-extern int is_nec;
-extern int is_rapidcad;
-extern int hasfpu;
+
 #define CPU_FEATURE_RDTSC   (1 << 0)
 #define CPU_FEATURE_MSR     (1 << 1)
 #define CPU_FEATURE_MMX     (1 << 2)

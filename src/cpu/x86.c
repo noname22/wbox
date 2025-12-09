@@ -115,28 +115,22 @@ dumpregs(int force)
                 seg_names[c], _opseg[c]->base, _opseg[c]->limit,
                 _opseg[c]->access, _opseg[c]->limit_low, _opseg[c]->limit_high);
     }
-    if (is386) {
-        x86_log("FS : base=%06X limit=%08X access=%02X  limit_low=%08X limit_high=%08X\n",
-                seg_fs, cpu_state.seg_fs.limit, cpu_state.seg_fs.access, cpu_state.seg_fs.limit_low,
-                cpu_state.seg_fs.limit_high);
-        x86_log("GS : base=%06X limit=%08X access=%02X  limit_low=%08X limit_high=%08X\n",
-                gs, cpu_state.seg_gs.limit, cpu_state.seg_gs.access, cpu_state.seg_gs.limit_low,
-                cpu_state.seg_gs.limit_high);
-        x86_log("GDT : base=%06X limit=%04X\n", gdt.base, gdt.limit);
-        x86_log("LDT : base=%06X limit=%04X\n", ldt.base, ldt.limit);
-        x86_log("IDT : base=%06X limit=%04X\n", idt.base, idt.limit);
-        x86_log("TR  : base=%06X limit=%04X\n", tr.base, tr.limit);
-        x86_log("386 in %s mode: %i-bit data, %-i-bit stack\n",
-                (msw & 1) ? ((cpu_state.eflags & VM_FLAG) ? "V86" : "protected") : "real",
-                (use32) ? 32 : 16, (stack32) ? 32 : 16);
-        x86_log("CR0=%08X CR2=%08X CR3=%08X CR4=%08x\n", cr0, cr2, cr3, cr4);
-        x86_log("EAX=%08X EBX=%08X ECX=%08X EDX=%08X\nEDI=%08X ESI=%08X EBP=%08X ESP=%08X\n",
-                EAX, EBX, ECX, EDX, EDI, ESI, EBP, ESP);
-    } else {
-        x86_log("808x/286 in %s mode\n", (msw & 1) ? "protected" : "real");
-        x86_log("AX=%04X BX=%04X CX=%04X DX=%04X DI=%04X SI=%04X BP=%04X SP=%04X\n",
-                AX, BX, CX, DX, DI, SI, BP, SP);
-    }
+    x86_log("FS : base=%06X limit=%08X access=%02X  limit_low=%08X limit_high=%08X\n",
+            seg_fs, cpu_state.seg_fs.limit, cpu_state.seg_fs.access, cpu_state.seg_fs.limit_low,
+            cpu_state.seg_fs.limit_high);
+    x86_log("GS : base=%06X limit=%08X access=%02X  limit_low=%08X limit_high=%08X\n",
+            gs, cpu_state.seg_gs.limit, cpu_state.seg_gs.access, cpu_state.seg_gs.limit_low,
+            cpu_state.seg_gs.limit_high);
+    x86_log("GDT : base=%06X limit=%04X\n", gdt.base, gdt.limit);
+    x86_log("LDT : base=%06X limit=%04X\n", ldt.base, ldt.limit);
+    x86_log("IDT : base=%06X limit=%04X\n", idt.base, idt.limit);
+    x86_log("TR  : base=%06X limit=%04X\n", tr.base, tr.limit);
+    x86_log("386 in %s mode: %i-bit data, %-i-bit stack\n",
+            (msw & 1) ? ((cpu_state.eflags & VM_FLAG) ? "V86" : "protected") : "real",
+            (use32) ? 32 : 16, (stack32) ? 32 : 16);
+    x86_log("CR0=%08X CR2=%08X CR3=%08X CR4=%08x\n", cr0, cr2, cr3, cr4);
+    x86_log("EAX=%08X EBX=%08X ECX=%08X EDX=%08X\nEDI=%08X ESI=%08X EBP=%08X ESP=%08X\n",
+            EAX, EBX, ECX, EDX, EDI, ESI, EBP, ESP);
     x86_log("Entries in readlookup : %i    writelookup : %i\n", readlnum, writelnum);
     x87_dumpregs();
     indump = 0;
@@ -248,11 +242,9 @@ reset_common(int hard)
     if (in_smm)
         leave_smm();
 
-    if (is486 && !hard && soft_reset_pci) {
+    if (!hard && soft_reset_pci) {
         dma_reset();
-        /* TODO: Hack, but will do for time being, because all AT machines currently are 286+,
-                 and vice-versa. */
-        dma_set_at(is286);
+        dma_set_at(1);
         device_reset_all(DEVICE_ALL);
     }
 
@@ -269,47 +261,32 @@ reset_common(int hard)
     cyrix.arr[3].base = 0x30000;
     cyrix.arr[3].size = 65536;
 
-    if (hascache)
-        cr0 = 1 << 30;
-    else
-        cr0 = 0;
-    if (is386 && !is486 && ((fpu_type == FPU_387) || (fpu_type == FPU_NONE)))
-        cr0 |= 0x10;
-    cpu_cache_int_enabled = 0;  
+    cr0 = 1 << 30;  /* Pentium II has cache */
+    cpu_cache_int_enabled = 0;
     cpu_update_waitstates();
     cr4              = 0;
     cpu_state.eflags = 0;
     cgate32          = 0;
 #ifdef USE_DEBUG_REGS_486
-    if (is386) {
-#else
-    if (is386 && !is486) {
+    for (uint8_t i = 0; i < 4; i++)
+        dr[i] = 0x00000000;
+    dr[6] = 0xffff1ff0;
+    dr[7] = 0x00000400;
 #endif
-        for (uint8_t i = 0; i < 4; i++)
-            dr[i] = 0x00000000;
-        dr[6] = 0xffff1ff0;
-        dr[7] = 0x00000400;
+
+    loadcs(0xF000);
+    cpu_state.pc = 0xFFF0;
+    if (hard) {
+        rammask = 0xFFFFFFFF;  /* Pentium II has 32-bit addressing */
+        mem_a20_key = mem_a20_alt = mem_a20_state = 0;
     }
-    if (is286) {
-        if (is486)
-            loadcs(0xF000);
-        else
-            loadcs_2386(0xF000);
-        cpu_state.pc = 0xFFF0;
-        if (hard) {
-            rammask = cpu_16bitbus ? 0xFFFFFF : 0xFFFFFFFF;
-            if (is6117)
-                rammask |= 0x03000000;
-            mem_a20_key = mem_a20_alt = mem_a20_state = 0;
-        }
-    }
+
     idt.base        = 0;
     cpu_state.flags = 2;
     trap            = 0;
 
-    idt.limit = is386 ? 0x03ff : 0xffff;
-    if (is386 || hard)
-        EAX = EBX = ECX = EDX = ESI = EDI = EBP = ESP = 0;
+    idt.limit = 0x03ff;
+    EAX = EBX = ECX = EDX = ESI = EDI = EBP = ESP = 0;
 
     if (hard) {
         makeznptable();
@@ -335,10 +312,8 @@ reset_common(int hard)
     smi_line = smm_in_hlt = 0;
     smi_block             = 0;
 
-    if (hard) {
-        if (is486)
-            smbase = is_am486dxl ? 0x00060000 : 0x00030000;
-    }
+    if (hard)
+        smbase = 0x00030000;  /* Pentium II SMM base */
     in_sys = 0;
 
     shadowbios = shadowbios_write = 0;
@@ -350,14 +325,9 @@ reset_common(int hard)
         memset(_tr, 0x00, sizeof(_tr));
         memset(_cache, 0x00, sizeof(_cache));
 
-        /* If we have an AT or PS/2 keyboard controller, make sure the A20 state
-           is correct. */
         device_reset_all(DEVICE_KBC);
     } else
         device_reset_all(DEVICE_SOFTRESET);
-
-    if (!is286)
-        reset_808x(hard);
 
     in_lock    = 0;
 
@@ -390,9 +360,7 @@ void
 hardresetx86(void)
 {
     dma_reset();
-    /* TODO: Hack, but will do for time being, because all AT machines currently are 286+,
-       and vice-versa. */
-    dma_set_at(is286);
+    dma_set_at(1);
     device_reset_all(DEVICE_ALL);
 
     cpu_alt_reset = 0;

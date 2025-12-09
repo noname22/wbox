@@ -34,7 +34,7 @@ opCDQ(UNUSED(uint32_t fetchdat))
 static int
 opNOP(UNUSED(uint32_t fetchdat))
 {
-    CLOCK_CYCLES((is486) ? 1 : 3);
+    CLOCK_CYCLES(1);
     PREFETCH_RUN(3, 1, -1, 0, 0, 0, 0, 0);
     return 0;
 }
@@ -75,11 +75,7 @@ opF6_a16(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             setznp8(src & dst);
-            if (is486) {
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-            }
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
             PREFETCH_RUN((cpu_mod == 3) ? 2 : 5, 3, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
             break;
         case 0x10: /*NOT b*/
@@ -129,17 +125,15 @@ opF6_a16(uint32_t fetchdat)
             if (dst && !(tempw & 0xff00)) {
                 AH = src16 % dst;
                 AL = (src16 / dst) & 0xff;
-                if (!cpu_iscyrix && !is6117) {
-                    flags_rebuild();
-                    cpu_state.flags |= 0x8D5; /*Not a Cyrix*/
-                    cpu_state.flags &= ~1;
-                }
+                flags_rebuild();
+                cpu_state.flags |= 0x8D5;
+                cpu_state.flags &= ~1;
             } else {
                 x86_int(0);
                 return 1;
             }
-            CLOCK_CYCLES((is486 && !cpu_iscyrix) ? 16 : 14);
-            PREFETCH_RUN((is486 && !cpu_iscyrix) ? 16 : 14, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
+            CLOCK_CYCLES(16);
+            PREFETCH_RUN(16, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
             break;
         case 0x38: /*IDIV AL,b*/
             tempws = (int) (int16_t) AX;
@@ -149,11 +143,9 @@ opF6_a16(uint32_t fetchdat)
             if (dst && ((int) temps == tempws2)) {
                 AH = (tempws % (int) ((int8_t) dst)) & 0xff;
                 AL = tempws2 & 0xff;
-                if (!cpu_iscyrix && !is6117) {
-                    flags_rebuild();
-                    cpu_state.flags |= 0x8D5; /*Not a Cyrix*/
-                    cpu_state.flags &= ~1;
-                }
+                flags_rebuild();
+                cpu_state.flags |= 0x8D5;
+                cpu_state.flags &= ~1;
             } else {
                 x86_int(0);
                 return 1;
@@ -192,11 +184,7 @@ opF6_a32(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             setznp8(src & dst);
-            if (is486) {
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-            }
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
             PREFETCH_RUN((cpu_mod == 3) ? 2 : 5, 3, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
             break;
         case 0x10: /*NOT b*/
@@ -246,17 +234,15 @@ opF6_a32(uint32_t fetchdat)
             if (dst && !(tempw & 0xff00)) {
                 AH = src16 % dst;
                 AL = (src16 / dst) & 0xff;
-                if (!cpu_iscyrix && !is6117) {
-                    flags_rebuild();
-                    cpu_state.flags |= 0x8D5; /*Not a Cyrix*/
-                    cpu_state.flags &= ~1;
-                }
+                flags_rebuild();
+                cpu_state.flags |= 0x8D5;
+                cpu_state.flags &= ~1;
             } else {
                 x86_int(0);
                 return 1;
             }
-            CLOCK_CYCLES((is486 && !cpu_iscyrix) ? 16 : 14);
-            PREFETCH_RUN((is486 && !cpu_iscyrix) ? 16 : 14, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
+            CLOCK_CYCLES(16);
+            PREFETCH_RUN(16, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
             break;
         case 0x38: /*IDIV AL,b*/
             tempws = (int) (int16_t) AX;
@@ -266,11 +252,9 @@ opF6_a32(uint32_t fetchdat)
             if (dst && ((int) temps == tempws2)) {
                 AH = (tempws % (int) ((int8_t) dst)) & 0xff;
                 AL = tempws2 & 0xff;
-                if (!cpu_iscyrix && !is6117) {
-                    flags_rebuild();
-                    cpu_state.flags |= 0x8D5; /*Not a Cyrix*/
-                    cpu_state.flags &= ~1;
-                }
+                flags_rebuild();
+                cpu_state.flags |= 0x8D5;
+                cpu_state.flags &= ~1;
             } else {
                 x86_int(0);
                 return 1;
@@ -309,11 +293,7 @@ opF7_w_a16(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             setznp16(src & dst);
-            if (is486) {
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-            }
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
             PREFETCH_RUN((cpu_mod == 3) ? 2 : 5, 4, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
             break;
         case 0x10: /*NOT w*/
@@ -366,14 +346,13 @@ opF7_w_a16(uint32_t fetchdat)
             if (dst && !(templ2 & 0xffff0000)) {
                 DX = templ % dst;
                 AX = (templ / dst) & 0xffff;
-                if (!cpu_iscyrix && !is6117)
-                    setznp16(AX); /*Not a Cyrix*/
+                setznp16(AX);
             } else {
                 x86_int(0);
                 return 1;
             }
-            CLOCK_CYCLES((is486 && !cpu_iscyrix) ? 24 : 22);
-            PREFETCH_RUN((is486 && !cpu_iscyrix) ? 24 : 22, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
+            CLOCK_CYCLES(24);
+            PREFETCH_RUN(24, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
             break;
         case 0x38: /*IDIV AX,w*/
             tempws = (int) ((DX << 16) | AX);
@@ -383,8 +362,7 @@ opF7_w_a16(uint32_t fetchdat)
             if ((dst != 0) && ((int) temps16 == tempws2)) {
                 DX = tempws % (int) ((int16_t) dst);
                 AX = tempws2 & 0xffff;
-                if (!cpu_iscyrix && !is6117)
-                    setznp16(AX); /*Not a Cyrix*/
+                setznp16(AX);
             } else {
                 x86_int(0);
                 return 1;
@@ -422,11 +400,7 @@ opF7_w_a32(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             setznp16(src & dst);
-            if (is486) {
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-            }
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
             PREFETCH_RUN((cpu_mod == 3) ? 2 : 5, 4, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
             break;
         case 0x10: /*NOT w*/
@@ -479,15 +453,13 @@ opF7_w_a32(uint32_t fetchdat)
             if (dst && !(templ2 & 0xffff0000)) {
                 DX = templ % dst;
                 AX = (templ / dst) & 0xffff;
-                if (!cpu_iscyrix && !is6117)
-                    setznp16(AX); /*Not a Cyrix*/
+                setznp16(AX);
             } else {
-                //                        fatal("DIVw BY 0 %04X:%04X %i\n",cs>>4,pc,ins);
                 x86_int(0);
                 return 1;
             }
-            CLOCK_CYCLES((is486 && !cpu_iscyrix) ? 24 : 22);
-            PREFETCH_RUN((is486 && !cpu_iscyrix) ? 24 : 22, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
+            CLOCK_CYCLES(24);
+            PREFETCH_RUN(24, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
             break;
         case 0x38: /*IDIV AX,w*/
             tempws = (int) ((DX << 16) | AX);
@@ -497,8 +469,7 @@ opF7_w_a32(uint32_t fetchdat)
             if ((dst != 0) && ((int) temps16 == tempws2)) {
                 DX = tempws % (int) ((int16_t) dst);
                 AX = tempws2 & 0xffff;
-                if (!cpu_iscyrix && !is6117)
-                    setznp16(AX); /*Not a Cyrix*/
+                setznp16(AX);
             } else {
                 x86_int(0);
                 return 1;
@@ -534,11 +505,7 @@ opF7_l_a16(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             setznp32(src & dst);
-            if (is486) {
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-            }
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
             PREFETCH_RUN((cpu_mod == 3) ? 2 : 5, 5, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
             break;
         case 0x10: /*NOT l*/
@@ -587,16 +554,14 @@ opF7_l_a16(uint32_t fetchdat)
         case 0x30: /*DIV EAX,l*/
             if (divl(dst))
                 return 1;
-            if (!cpu_iscyrix && !is6117)
-                setznp32(EAX); /*Not a Cyrix*/
-            CLOCK_CYCLES((is486) ? 40 : 38);
-            PREFETCH_RUN(is486 ? 40 : 38, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
+            setznp32(EAX);
+            CLOCK_CYCLES(40);
+            PREFETCH_RUN(40, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
             break;
         case 0x38: /*IDIV EAX,l*/
             if (idivl((int32_t) dst))
                 return 1;
-            if (!cpu_iscyrix && !is6117)
-                setznp32(EAX); /*Not a Cyrix*/
+            setznp32(EAX);
             CLOCK_CYCLES(43);
             PREFETCH_RUN(43, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
             break;
@@ -627,11 +592,7 @@ opF7_l_a32(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             setznp32(src & dst);
-            if (is486) {
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-            }
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
             PREFETCH_RUN((cpu_mod == 3) ? 2 : 5, 5, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
             break;
         case 0x10: /*NOT l*/
@@ -680,16 +641,14 @@ opF7_l_a32(uint32_t fetchdat)
         case 0x30: /*DIV EAX,l*/
             if (divl(dst))
                 return 1;
-            if (!cpu_iscyrix && !is6117)
-                setznp32(EAX); /*Not a Cyrix*/
-            CLOCK_CYCLES((is486) ? 40 : 38);
-            PREFETCH_RUN(is486 ? 40 : 38, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
+            setznp32(EAX);
+            CLOCK_CYCLES(40);
+            PREFETCH_RUN(40, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
             break;
         case 0x38: /*IDIV EAX,l*/
             if (idivl((int32_t) dst))
                 return 1;
-            if (!cpu_iscyrix && !is6117)
-                setznp32(EAX); /*Not a Cyrix*/
+            setznp32(EAX);
             CLOCK_CYCLES(43);
             PREFETCH_RUN(43, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
             break;
@@ -780,8 +739,8 @@ opBOUND_w_a16(uint32_t fetchdat)
         return 1;
     }
 
-    CLOCK_CYCLES(is486 ? 7 : 10);
-    PREFETCH_RUN(is486 ? 7 : 10, 2, rmdat, 2, 0, 0, 0, 0);
+    CLOCK_CYCLES(7);
+    PREFETCH_RUN(7, 2, rmdat, 2, 0, 0, 0, 0);
     return 0;
 }
 static int
@@ -803,8 +762,8 @@ opBOUND_w_a32(uint32_t fetchdat)
         return 1;
     }
 
-    CLOCK_CYCLES(is486 ? 7 : 10);
-    PREFETCH_RUN(is486 ? 7 : 10, 2, rmdat, 2, 0, 0, 0, 1);
+    CLOCK_CYCLES(7);
+    PREFETCH_RUN(7, 2, rmdat, 2, 0, 0, 0, 1);
     return 0;
 }
 
@@ -827,8 +786,8 @@ opBOUND_l_a16(uint32_t fetchdat)
         return 1;
     }
 
-    CLOCK_CYCLES(is486 ? 7 : 10);
-    PREFETCH_RUN(is486 ? 7 : 10, 2, rmdat, 1, 1, 0, 0, 0);
+    CLOCK_CYCLES(7);
+    PREFETCH_RUN(7, 2, rmdat, 1, 1, 0, 0, 0);
     return 0;
 }
 static int
@@ -850,8 +809,8 @@ opBOUND_l_a32(uint32_t fetchdat)
         return 1;
     }
 
-    CLOCK_CYCLES(is486 ? 7 : 10);
-    PREFETCH_RUN(is486 ? 7 : 10, 2, rmdat, 1, 1, 0, 0, 1);
+    CLOCK_CYCLES(7);
+    PREFETCH_RUN(7, 2, rmdat, 1, 1, 0, 0, 1);
     return 0;
 }
 

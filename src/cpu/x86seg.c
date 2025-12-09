@@ -172,8 +172,7 @@ do_seg_load(x86seg *s, uint16_t *segdat)
     if (segdat[3] & 0x0080)
         s->limit = (s->limit << 12) | 0xfff;
     s->base = segdat[1] | ((segdat[2] & 0x00ff) << 16);
-    if (is386)
-        s->base |= ((segdat[3] >> 8) << 24);
+    s->base |= ((segdat[3] >> 8) << 24);
     s->access  = segdat[2] >> 8;
     s->ar_high = segdat[3] & 0xff;
 
@@ -256,15 +255,8 @@ read_descriptor(uint32_t addr, uint16_t *segdat, uint32_t *segdat32, int overrid
 {
     if (override)
         cpl_override = 1;
-    if (cpu_16bitbus) {
-        segdat[0] = readmemw(0, addr);
-        segdat[1] = readmemw(0, addr + 2);
-        segdat[2] = readmemw(0, addr + 4);
-        segdat[3] = readmemw(0, addr + 6);
-    } else {
-        segdat32[0] = readmeml(0, addr);
-        segdat32[1] = readmeml(0, addr + 4);
-    }
+    segdat32[0] = readmeml(0, addr);
+    segdat32[1] = readmeml(0, addr + 4);
     if (override)
         cpl_override = 0;
 }
@@ -779,42 +771,32 @@ PUSHW(uint16_t v)
 static inline void
 PUSHL(uint32_t v)
 {
-    if (cpu_16bitbus) {
-        PUSHW(v >> 16);
-        PUSHW(v & 0xffff);
+    if (stack32) {
+        writememl(ss, ESP - 4, v);
+        if (cpu_state.abrt)
+            return;
+        ESP -= 4;
     } else {
-        if (stack32) {
-            writememl(ss, ESP - 4, v);
-            if (cpu_state.abrt)
-                return;
-            ESP -= 4;
-        } else {
-            writememl(ss, ((SP - 4) & 0xffff), v);
-            if (cpu_state.abrt)
-                return;
-            SP -= 4;
-        }
+        writememl(ss, ((SP - 4) & 0xffff), v);
+        if (cpu_state.abrt)
+            return;
+        SP -= 4;
     }
 }
 
 static inline void
 PUSHL_SEL(uint32_t v)
 {
-    if (cpu_16bitbus) {
-        PUSHW(v >> 16);
-        PUSHW(v & 0xffff);
+    if (stack32) {
+        writememw(ss, ESP - 4, v);
+        if (cpu_state.abrt)
+            return;
+        ESP -= 4;
     } else {
-        if (stack32) {
-            writememw(ss, ESP - 4, v);
-            if (cpu_state.abrt)
-                return;
-            ESP -= 4;
-        } else {
-            writememw(ss, ((SP - 4) & 0xffff), v);
-            if (cpu_state.abrt)
-                return;
-            SP -= 4;
-        }
+        writememw(ss, ((SP - 4) & 0xffff), v);
+        if (cpu_state.abrt)
+            return;
+        SP -= 4;
     }
 }
 
@@ -841,21 +823,16 @@ POPL(void)
 {
     uint32_t templ;
 
-    if (cpu_16bitbus) {
-        templ = POPW();
-        templ |= (POPW() << 16);
+    if (stack32) {
+        templ = readmeml(ss, ESP);
+        if (cpu_state.abrt)
+            return 0;
+        ESP += 4;
     } else {
-        if (stack32) {
-            templ = readmeml(ss, ESP);
-            if (cpu_state.abrt)
-                return 0;
-            ESP += 4;
-        } else {
-            templ = readmeml(ss, SP);
-            if (cpu_state.abrt)
-                return 0;
-            SP += 4;
-        }
+        templ = readmeml(ss, SP);
+        if (cpu_state.abrt)
+            return 0;
+        SP += 4;
     }
 
     return templ;
@@ -1035,11 +1012,7 @@ loadcscall(uint16_t seg)
                                 if (tr.access & 8) {
                                     addr  = 4 + tr.base + (DPL << 3);
                                     newss = readmemw(0, addr + 4);
-                                    if (cpu_16bitbus) {
-                                        newsp = readmemw(0, addr);
-                                        newsp |= (readmemw(0, addr + 2) << 16);
-                                    } else
-                                        newsp = readmeml(0, addr);
+                                    newsp = readmeml(0, addr);
                                 } else {
                                     addr  = 2 + tr.base + (DPL * 4);
                                     newss = readmemw(0, addr + 2);
@@ -1112,7 +1085,7 @@ loadcscall(uint16_t seg)
 
                                 x86seg_log("Type %04X\n", type);
                                 if (type == 0x0c00) {
-                                    is586 ? PUSHL(oldss) : PUSHL_SEL(oldss);
+                                    PUSHL(oldss);
                                     PUSHL(oldsp2);
                                     if (cpu_state.abrt) {
                                         SS  = oldss;
@@ -1582,10 +1555,6 @@ pmodeint(int num, int soft)
         return;
     }
     type = segdat[2] & 0x1f00;
-    if (((type == 0x0e00) || (type == 0x0f00)) && !is386) {
-        x86gpf("pmodeint(): Gate type illegal on 286", seg & 0xfffc);
-        return;
-    }
     switch (type) {
         case 0x0600:
         case 0x0700:
@@ -1695,17 +1664,10 @@ pmodeint(int num, int soft)
                         cpl_override = 1;
                         if (type >= 0x0800) {
                             if (cpu_state.eflags & VM_FLAG) {
-                                if (is586) {
-                                    PUSHL(GS);
-                                    PUSHL(FS);
-                                    PUSHL(DS);
-                                    PUSHL(ES);
-                                } else {
-                                    PUSHL_SEL(GS);
-                                    PUSHL_SEL(FS);
-                                    PUSHL_SEL(DS);
-                                    PUSHL_SEL(ES);
-                                }
+                                PUSHL(GS);
+                                PUSHL(FS);
+                                PUSHL(DS);
+                                PUSHL(ES);
                                 if (cpu_state.abrt)
                                     return;
                                 op_loadseg(0, &cpu_state.seg_ds);
@@ -1713,10 +1675,10 @@ pmodeint(int num, int soft)
                                 op_loadseg(0, &cpu_state.seg_fs);
                                 op_loadseg(0, &cpu_state.seg_gs);
                             }
-                            is586 ? PUSHL(oldss) : PUSHL_SEL(oldss);
+                            PUSHL(oldss);
                             PUSHL(oldsp);
                             PUSHL(cpu_state.flags | (cpu_state.eflags << 16));
-                            is586 ? PUSHL(CS) : PUSHL_SEL(CS);
+                            PUSHL(CS);
                             PUSHL(cpu_state.pc);
                             if (cpu_state.abrt)
                                 return;
@@ -1752,7 +1714,7 @@ pmodeint(int num, int soft)
                     }
                     if (type > 0x0800) {
                         PUSHL(cpu_state.flags | (cpu_state.eflags << 16));
-                        is586 ? PUSHL(CS) : PUSHL_SEL(CS);
+                        PUSHL(CS);
                         PUSHL(cpu_state.pc);
                         if (cpu_state.abrt)
                             return;
@@ -1846,7 +1808,7 @@ pmodeiret(int is32)
     uint32_t     *segdat232 = (uint32_t *) segdat2;
     const x86seg *dt;
 
-    if (is386 && (cpu_state.eflags & VM_FLAG)) {
+    if (cpu_state.eflags & VM_FLAG) {
         if (IOPL != 3) {
             x86gpf("Protected mode IRET: IOPL != 3", 0);
             return;
@@ -1918,7 +1880,7 @@ pmodeiret(int is32)
             ESP = oldsp;
             return;
         }
-        if (is386 && ((tempflags >> 16) & VM_FLAG)) {
+        if ((tempflags >> 16) & VM_FLAG) {
             newsp   = POPL();
             newss   = POPL();
             segs[0] = POPL();
@@ -2185,10 +2147,8 @@ taskswitch286(uint16_t seg, uint16_t *segdat, int is32)
 
     base  = segdat[1] | ((segdat[2] & 0x00ff) << 16);
     limit = segdat[0];
-    if (is386) {
-        base |= (segdat[3] >> 8) << 24;
-        limit |= (segdat[3] & 0x000f) << 16;
-    }
+    base |= (segdat[3] >> 8) << 24;
+    limit |= (segdat[3] & 0x000f) << 16;
 
     if (is32) {
         if (limit < 103) {
@@ -2479,13 +2439,11 @@ taskswitch286(uint16_t seg, uint16_t *segdat, int is32)
         templ     = (ldt.seg & 0xfff8) + gdt.base;
         ldt.limit = readmemw(0, templ);
         ldt.base  = (readmemw(0, templ + 2)) | (readmemb(0, templ + 4) << 16);
-        if (is386) {
-            if (readmemb(0, templ + 6) & 0x80) {
-                ldt.limit <<= 12;
-                ldt.limit |= 0xfff;
-            }
-            ldt.base |= (readmemb(0, templ + 7) << 24);
+        if (readmemb(0, templ + 6) & 0x80) {
+            ldt.limit <<= 12;
+            ldt.limit |= 0xfff;
         }
+        ldt.base |= (readmemb(0, templ + 7) << 24);
 
         if (!(new_cs & 0xfff8) && !(new_cs & 0x0004)) {
             x86ts(NULL, 0);
@@ -2548,10 +2506,8 @@ taskswitch286(uint16_t seg, uint16_t *segdat, int is32)
         op_loadseg(new_es, &cpu_state.seg_es);
         op_loadseg(new_ss, &cpu_state.seg_ss);
         op_loadseg(new_ds, &cpu_state.seg_ds);
-        if (is386) {
-            op_loadseg(0, &cpu_state.seg_fs);
-            op_loadseg(0, &cpu_state.seg_gs);
-        }
+        op_loadseg(0, &cpu_state.seg_fs);
+        op_loadseg(0, &cpu_state.seg_gs);
     }
 
     tr.seg     = seg;

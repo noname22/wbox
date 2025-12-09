@@ -456,43 +456,40 @@ int
 is_lock_legal(uint32_t fetchdat)
 {
     int legal = 1;
+    fetch_dat_t fetch_dat;
+    fetch_dat.fd = fetchdat;
 
-    if (is386) {
-        fetch_dat_t fetch_dat;
-        fetch_dat.fd = fetchdat;
-
-        legal = lock_legal[fetch_dat.b[0]];
+    legal = lock_legal[fetch_dat.b[0]];
+    if (legal == 1)
+        legal = 1; // ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
+    else if (legal == 2) {
+        legal = lock_legal_0f[fetch_dat.b[1]];
         if (legal == 1)
-            legal = 1; // ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
-        else if (legal == 2) {
-            legal = lock_legal_0f[fetch_dat.b[1]];
+            legal = ((fetch_dat.b[2] >> 6) != 0x03);    /* reg,reg is illegal */
+        else if (legal == 3) {
+            legal = lock_legal_ba[(fetch_dat.b[2] >> 3) & 0x07];
             if (legal == 1)
-                legal = ((fetch_dat.b[2] >> 6) != 0x03);    /* reg,reg is illegal */
-            else if (legal == 3) {
-                legal = lock_legal_ba[(fetch_dat.b[2] >> 3) & 0x07];
-                if (legal == 1)
-                    legal = ((fetch_dat.b[2] >> 6) != 0x03);    /* reg,imm is illegal */
-            }
-        } else if (legal == 3)  switch(fetch_dat.b[0]) {
-            case 0x80 ... 0x83:
-                legal = lock_legal_80[(fetch_dat.b[1] >> 3) & 0x07];
-            if (legal == 1)
-                legal = ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
-            break;
-            case 0xf6 ... 0xf7:
-                legal = lock_legal_f6[(fetch_dat.b[1] >> 3) & 0x07];
-            if (legal == 1)
-                legal = ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
-            break;
-            case 0xfe ... 0xff:
-                legal = lock_legal_fe[(fetch_dat.b[1] >> 3) & 0x07];
-            if (legal == 1)
-                legal = ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
-            break;
-            default:
-                legal = 0;
-            break;
+                legal = ((fetch_dat.b[2] >> 6) != 0x03);    /* reg,imm is illegal */
         }
+    } else if (legal == 3)  switch(fetch_dat.b[0]) {
+        case 0x80 ... 0x83:
+            legal = lock_legal_80[(fetch_dat.b[1] >> 3) & 0x07];
+        if (legal == 1)
+            legal = ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
+        break;
+        case 0xf6 ... 0xf7:
+            legal = lock_legal_f6[(fetch_dat.b[1] >> 3) & 0x07];
+        if (legal == 1)
+            legal = ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
+        break;
+        case 0xfe ... 0xff:
+            legal = lock_legal_fe[(fetch_dat.b[1] >> 3) & 0x07];
+        if (legal == 1)
+            legal = ((fetch_dat.b[1] >> 6) != 0x03);    /* reg is illegal */
+        break;
+        default:
+            legal = 0;
+        break;
     }
 
     return legal;
@@ -600,8 +597,6 @@ set_use32(int u)
 static void
 smm_seg_load(x86seg *s)
 {
-    if (!is386)
-        s->base &= 0x00ffffff;
 
     if ((s->access & 0x18) != 0x10 || !(s->access & (1 << 2))) {
         /* Expand down. */
@@ -719,13 +714,11 @@ smram_save_state_p5(uint32_t *saved_state, int in_hlt)
     saved_state[SMRAM_FIELD_P5_GS_ACCESS]   = (cpu_state.seg_gs.ar_high << 16) | (cpu_state.seg_gs.access << 8);
 
     /* Am486/5x86 stuff */
-    if (!is_pentium) {
-        saved_state[SMRAM_FIELD_AM486_CR2] = cr2;
-        saved_state[SMRAM_FIELD_AM486_DR0] = dr[0];
-        saved_state[SMRAM_FIELD_AM486_DR1] = dr[1];
-        saved_state[SMRAM_FIELD_AM486_DR2] = dr[2];
-        saved_state[SMRAM_FIELD_AM486_DR3] = dr[3];
-    }
+    saved_state[SMRAM_FIELD_AM486_CR2] = cr2;
+    saved_state[SMRAM_FIELD_AM486_DR0] = dr[0];
+    saved_state[SMRAM_FIELD_AM486_DR1] = dr[1];
+    saved_state[SMRAM_FIELD_AM486_DR2] = dr[2];
+    saved_state[SMRAM_FIELD_AM486_DR3] = dr[3];
 }
 
 static void
@@ -830,13 +823,11 @@ smram_restore_state_p5(uint32_t *saved_state)
         smbase = saved_state[SMRAM_FIELD_P5_SMBASE_OFFSET];
 
     /* Am486/5x86 stuff */
-    if (!is_pentium) {
-        cr2   = saved_state[SMRAM_FIELD_AM486_CR2];
-        dr[0] = saved_state[SMRAM_FIELD_AM486_DR0];
-        dr[1] = saved_state[SMRAM_FIELD_AM486_DR1];
-        dr[2] = saved_state[SMRAM_FIELD_AM486_DR2];
-        dr[3] = saved_state[SMRAM_FIELD_AM486_DR3];
-    }
+    cr2   = saved_state[SMRAM_FIELD_AM486_CR2];
+    dr[0] = saved_state[SMRAM_FIELD_AM486_DR0];
+    dr[1] = saved_state[SMRAM_FIELD_AM486_DR1];
+    dr[2] = saved_state[SMRAM_FIELD_AM486_DR2];
+    dr[3] = saved_state[SMRAM_FIELD_AM486_DR3];
 }
 
 static void
@@ -1020,9 +1011,7 @@ smram_restore_state_p6(uint32_t *saved_state)
     cpu_state.seg_gs.ar_high = (saved_state[SMRAM_FIELD_P6_GS_SELECTOR_AR] >> 24) & 0xff;
     smm_seg_load(&cpu_state.seg_gs);
 
-    rammask     = cpu_16bitbus ? 0xFFFFFF : 0xFFFFFFFF;
-    if (is6117)
-        rammask |= 0x3000000;
+    rammask     = 0xFFFFFFFF;
 
     if (saved_state[SMRAM_FIELD_P6_A20M] & 0x01)
         rammask &= 0xffefffff;
@@ -1068,8 +1057,7 @@ smram_save_state_amd_k(uint32_t *saved_state, int in_hlt)
     saved_state[SMRAM_FIELD_AMD_K_LDTR_SELECTOR] = ldt.seg;
     saved_state[SMRAM_FIELD_AMD_K_LDTR_BASE]     = ldt.base;
     saved_state[SMRAM_FIELD_AMD_K_LDTR_LIMIT]    = ldt.limit;
-    if (!is_k6)
-        saved_state[SMRAM_FIELD_AMD_K_LDTR_ACCESS] = (ldt.ar_high << 16) | (ldt.access << 8);
+    saved_state[SMRAM_FIELD_AMD_K_LDTR_ACCESS] = (ldt.ar_high << 16) | (ldt.access << 8);
 
     /* IDTR */
     saved_state[SMRAM_FIELD_AMD_K_IDTR_BASE]  = idt.base;
@@ -1149,10 +1137,8 @@ smram_restore_state_amd_k(uint32_t *saved_state)
     ldt.seg   = saved_state[SMRAM_FIELD_AMD_K_LDTR_SELECTOR];
     ldt.base  = saved_state[SMRAM_FIELD_AMD_K_LDTR_BASE];
     ldt.limit = saved_state[SMRAM_FIELD_AMD_K_LDTR_LIMIT];
-    if (!is_k6) {
-        ldt.access  = (saved_state[SMRAM_FIELD_AMD_K_LDTR_ACCESS] >> 8) & 0xff;
-        ldt.ar_high = (saved_state[SMRAM_FIELD_AMD_K_LDTR_ACCESS] >> 16) & 0xff;
-    }
+    ldt.access  = (saved_state[SMRAM_FIELD_AMD_K_LDTR_ACCESS] >> 8) & 0xff;
+    ldt.ar_high = (saved_state[SMRAM_FIELD_AMD_K_LDTR_ACCESS] >> 16) & 0xff;
     smm_seg_load(&ldt);
 
     /* IDTR */
@@ -1281,10 +1267,6 @@ enter_smm(int in_hlt)
     uint32_t saved_state[SMM_SAVE_STATE_MAP_SIZE];
     uint32_t smram_state = smbase + 0x10000;
 
-    /* If it's a CPU on which SMM is not supported, do nothing. */
-    if (!is_am486 && !is_pentium && !is_k5 && !is_k6 && !is_p6 && !is_cxsmm)
-        return;
-
     x386_common_log("enter_smm(): smbase = %08X\n", smbase);
     x386_common_log("CS : seg = %04X, base = %08X, limit = %08X, limit_low = %08X, limit_high = %08X, access = %02X, ar_high = %02X\n",
                     cpu_state.seg_cs.seg, cpu_state.seg_cs.base, cpu_state.seg_cs.limit, cpu_state.seg_cs.limit_low,
@@ -1322,22 +1304,10 @@ enter_smm(int in_hlt)
     smram_backup_all();
     smram_recalc_all(0);
 
-    if (is_cxsmm) {
-        if (!(cyrix.smhr & SMHR_VALID))
-            cyrix.smhr = (cyrix.arr[3].base + cyrix.arr[3].size) | SMHR_VALID;
-        smram_state = cyrix.smhr & SMHR_ADDR_MASK;
-    }
-
     memset(saved_state, 0x00, SMM_SAVE_STATE_MAP_SIZE * sizeof(uint32_t));
 
-    if (is_cxsmm) /* Cx6x86 */
-        smram_save_state_cyrix(saved_state, in_hlt);
-    else if (is_pentium || is_am486) /* Am486 / 5x86 / Intel P5 (Pentium) */
-        smram_save_state_p5(saved_state, in_hlt);
-    else if (is_k5 || is_k6) /* AMD K5 and K6 */
-        smram_save_state_amd_k(saved_state, in_hlt);
-    else if (is_p6) /* Intel P6 (Pentium Pro, Pentium II, Celeron) */
-        smram_save_state_p6(saved_state, in_hlt);
+    /* Intel P6 (Pentium Pro, Pentium II, Celeron) */
+    smram_save_state_p6(saved_state, in_hlt);
 
     cr0 &= ~0x8000000d;
     cpu_state.flags  = 2;
@@ -1347,74 +1317,40 @@ enter_smm(int in_hlt)
 
     dr[7] = 0x400;
 
-    if (is_cxsmm) {
-        cpu_state.pc = 0x0000;
-        cpl_override = 1;
-        if (is486)
-            cyrix_write_seg_descriptor(smram_state - 0x20, &cpu_state.seg_cs);
-        else
-            cyrix_write_seg_descriptor_2386(smram_state - 0x20, &cpu_state.seg_cs);
-        cpl_override             = 0;
-        cpu_state.seg_cs.seg     = (cyrix.arr[3].base >> 4);
-        cpu_state.seg_cs.base    = cyrix.arr[3].base;
-        cpu_state.seg_cs.limit   = 0xffffffff;
-        cpu_state.seg_cs.access  = 0x93;
-        cpu_state.seg_cs.ar_high = 0x80;
-        cpu_state.seg_cs.checked = 1;
+    cpu_state.pc             = 0x8000;
+    cpu_state.seg_ds.seg     = 0x00000000;
+    cpu_state.seg_ds.base    = 0x00000000;
+    cpu_state.seg_ds.limit   = 0xffffffff;
+    cpu_state.seg_ds.access  = 0x93;
+    cpu_state.seg_ds.ar_high = 0x80;
 
-        smm_seg_load(&cpu_state.seg_cs);
-    } else {
-        cpu_state.pc             = 0x8000;
-        cpu_state.seg_ds.seg     = 0x00000000;
-        cpu_state.seg_ds.base    = 0x00000000;
-        cpu_state.seg_ds.limit   = 0xffffffff;
-        cpu_state.seg_ds.access  = 0x93;
-        cpu_state.seg_ds.ar_high = 0x80;
+    memcpy(&cpu_state.seg_es, &cpu_state.seg_ds, sizeof(x86seg));
+    memcpy(&cpu_state.seg_ss, &cpu_state.seg_ds, sizeof(x86seg));
+    memcpy(&cpu_state.seg_fs, &cpu_state.seg_ds, sizeof(x86seg));
+    memcpy(&cpu_state.seg_gs, &cpu_state.seg_ds, sizeof(x86seg));
 
-        memcpy(&cpu_state.seg_es, &cpu_state.seg_ds, sizeof(x86seg));
-        memcpy(&cpu_state.seg_ss, &cpu_state.seg_ds, sizeof(x86seg));
-        memcpy(&cpu_state.seg_fs, &cpu_state.seg_ds, sizeof(x86seg));
-        memcpy(&cpu_state.seg_gs, &cpu_state.seg_ds, sizeof(x86seg));
+    cpu_state.seg_cs.seg = (smbase >> 4);
 
-        if (is_p6)
-            cpu_state.seg_cs.seg = (smbase >> 4);
-        else
-            cpu_state.seg_cs.seg = 0x3000;
+    /* On P6, CS selector in SMM is SMBASE >> 4. */
+    cpu_state.seg_cs.base    = smbase;
+    cpu_state.seg_cs.limit   = 0xffffffff;
+    cpu_state.seg_cs.access  = 0x93;
+    cpu_state.seg_cs.ar_high = 0x80;
+    cpu_state.seg_cs.checked = 1;
 
-        /* On Pentium, CS selector in SMM is always 3000, regardless of SMBASE. */
-        cpu_state.seg_cs.base    = smbase;
-        cpu_state.seg_cs.limit   = 0xffffffff;
-        cpu_state.seg_cs.access  = 0x93;
-        cpu_state.seg_cs.ar_high = 0x80;
-        cpu_state.seg_cs.checked = 1;
-
-        smm_seg_load(&cpu_state.seg_es);
-        smm_seg_load(&cpu_state.seg_cs);
-        smm_seg_load(&cpu_state.seg_ds);
-        smm_seg_load(&cpu_state.seg_ss);
-        smm_seg_load(&cpu_state.seg_fs);
-        smm_seg_load(&cpu_state.seg_gs);
-    }
+    smm_seg_load(&cpu_state.seg_es);
+    smm_seg_load(&cpu_state.seg_cs);
+    smm_seg_load(&cpu_state.seg_ds);
+    smm_seg_load(&cpu_state.seg_ss);
+    smm_seg_load(&cpu_state.seg_fs);
+    smm_seg_load(&cpu_state.seg_gs);
 
     cpu_state.op32 = use32;
 
     cpl_override = 1;
-    if (is_cxsmm) {
-        writememl(0, smram_state - 0x04, saved_state[0]);
-        writememl(0, smram_state - 0x08, saved_state[1]);
-        writememl(0, smram_state - 0x0c, saved_state[2]);
-        writememl(0, smram_state - 0x10, saved_state[3]);
-        writememl(0, smram_state - 0x14, saved_state[4]);
-        writememl(0, smram_state - 0x18, saved_state[5]);
-        writememl(0, smram_state - 0x24, saved_state[6]);
-        writememl(0, smram_state - 0x28, saved_state[7]);
-        writememl(0, smram_state - 0x2c, saved_state[8]);
-        writememl(0, smram_state - 0x30, saved_state[9]);
-    } else {
-        for (uint8_t n = 0; n < SMM_SAVE_STATE_MAP_SIZE; n++) {
-            smram_state -= 4;
-            writememl(0, smram_state, saved_state[n]);
-        }
+    for (uint8_t n = 0; n < SMM_SAVE_STATE_MAP_SIZE; n++) {
+        smram_state -= 4;
+        writememl(0, smram_state, saved_state[n]);
     }
     cpl_override = 0;
 
@@ -1430,9 +1366,7 @@ enter_smm(int in_hlt)
 
     if (unmask_a20_in_smm) {
         old_rammask = rammask;
-        rammask     = cpu_16bitbus ? 0xFFFFFF : 0xFFFFFFFF;
-        if (is6117)
-            rammask |= 0x3000000;
+        rammask     = 0xFFFFFFFF;
 
         flushmmucache();
     }
@@ -1446,11 +1380,8 @@ enter_smm(int in_hlt)
 void
 enter_smm_check(int in_hlt)
 {
-    uint8_t ccr1_check = ((ccr1 & (CCR1_USE_SMI | CCR1_SMAC | CCR1_SM3)) ==
-                          (CCR1_USE_SMI | CCR1_SM3)) && (cyrix.arr[3].size > 0);
-
     if (smi_line) {
-        if (!is_cxsmm || ccr1_check)  switch (in_smm) {
+        switch (in_smm) {
             default:
 #ifdef ENABLE_386_COMMON_LOG
                 fatal("SMI while in_smm = %i\n", in_smm);
@@ -1475,12 +1406,6 @@ enter_smm_check(int in_hlt)
 #endif
                 break;
         }
-#ifdef ENABLE_386_COMMON_LOG
-        else {
-            x386_common_log("SMI while in Cyrix disabled mode\n");
-            x386_common_log("lol\n");
-        }
-#endif
 
         smi_line = 0;
     }
@@ -1492,35 +1417,13 @@ leave_smm(void)
     uint32_t saved_state[SMM_SAVE_STATE_MAP_SIZE];
     uint32_t smram_state = smbase + 0x10000;
 
-    /* If it's a CPU on which SMM is not supported (or not implemented in 86Box), do nothing. */
-    if (!is_am486 && !is_pentium && !is_k5 && !is_k6 && !is_p6 && !is_cxsmm)
-        return;
-
     memset(saved_state, 0x00, SMM_SAVE_STATE_MAP_SIZE * sizeof(uint32_t));
 
     cpl_override = 1;
-    if (is_cxsmm) {
-        smram_state    = cyrix.smhr & SMHR_ADDR_MASK;
-        saved_state[0] = readmeml(0, smram_state - 0x04);
-        saved_state[1] = readmeml(0, smram_state - 0x08);
-        saved_state[2] = readmeml(0, smram_state - 0x0c);
-        saved_state[3] = readmeml(0, smram_state - 0x10);
-        saved_state[4] = readmeml(0, smram_state - 0x14);
-        saved_state[5] = readmeml(0, smram_state - 0x18);
-        if (is486)
-            cyrix_load_seg_descriptor(smram_state - 0x20, &cpu_state.seg_cs);
-        else
-            cyrix_load_seg_descriptor_2386(smram_state - 0x20, &cpu_state.seg_cs);
-        saved_state[6] = readmeml(0, smram_state - 0x24);
-        saved_state[7] = readmeml(0, smram_state - 0x28);
-        saved_state[8] = readmeml(0, smram_state - 0x2c);
-        saved_state[9] = readmeml(0, smram_state - 0x30);
-    } else {
-        for (uint8_t n = 0; n < SMM_SAVE_STATE_MAP_SIZE; n++) {
-            smram_state -= 4;
-            saved_state[n] = readmeml(0, smram_state);
-            x386_common_log("Reading %08X from memory at %08X to array element %i\n", saved_state[n], smram_state, n);
-        }
+    for (uint8_t n = 0; n < SMM_SAVE_STATE_MAP_SIZE; n++) {
+        smram_state -= 4;
+        saved_state[n] = readmeml(0, smram_state);
+        x386_common_log("Reading %08X from memory at %08X to array element %i\n", saved_state[n], smram_state, n);
     }
     cpl_override = 0;
 
@@ -1531,14 +1434,8 @@ leave_smm(void)
     }
 
     x386_common_log("New SMBASE: %08X (%08X)\n", saved_state[SMRAM_FIELD_P5_SMBASE_OFFSET], saved_state[66]);
-    if (is_cxsmm) /* Cx6x86 */
-        smram_restore_state_cyrix(saved_state);
-    else if (is_pentium || is_am486) /* Am486 / 5x86 / Intel P5 (Pentium) */
-        smram_restore_state_p5(saved_state);
-    else if (is_k5 || is_k6) /* AMD K5 and K6 */
-        smram_restore_state_amd_k(saved_state);
-    else if (is_p6) /* Intel P6 (Pentium Pro, Pentium II, Celeron) */
-        smram_restore_state_p6(saved_state);
+    /* Intel P6 (Pentium Pro, Pentium II, Celeron) */
+    smram_restore_state_p6(saved_state);
 
     in_smm = 0;
     smram_recalc_all(1);
@@ -2201,13 +2098,7 @@ cpu_fast_off_reset(void)
 void
 smi_raise(void)
 {
-    uint8_t ccr1_check = ((ccr1 & (CCR1_USE_SMI | CCR1_SMAC | CCR1_SM3)) ==
-                          (CCR1_USE_SMI | CCR1_SM3)) && (cyrix.arr[3].size > 0);
-
-    if (is_cxsmm && !ccr1_check)
-        return;
-
-    if (is486 && (cpu_fast_off_flags & 0x80000000))
+    if (cpu_fast_off_flags & 0x80000000)
         cpu_fast_off_advance();
 
     smi_line = 1;
@@ -2216,7 +2107,7 @@ smi_raise(void)
 void
 nmi_raise(void)
 {
-    if (is486 && (cpu_fast_off_flags & 0x20000000))
+    if (cpu_fast_off_flags & 0x20000000)
         cpu_fast_off_advance();
 
     nmi = 1;

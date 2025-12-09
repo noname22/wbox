@@ -93,7 +93,7 @@ opLOOPNE_w(uint32_t fetchdat)
 {
     int8_t offset = (int8_t) getbytef();
     CX--;
-    CLOCK_CYCLES((is486) ? 7 : 11);
+    CLOCK_CYCLES(7);
     PREFETCH_RUN(11, 2, -1, 0, 0, 0, 0, 0);
     if (CX && !ZF_SET()) {
         cpu_state.pc += offset;
@@ -110,7 +110,7 @@ opLOOPNE_l(uint32_t fetchdat)
 {
     int8_t offset = (int8_t) getbytef();
     ECX--;
-    CLOCK_CYCLES((is486) ? 7 : 11);
+    CLOCK_CYCLES(7);
     PREFETCH_RUN(11, 2, -1, 0, 0, 0, 0, 0);
     if (ECX && !ZF_SET()) {
         cpu_state.pc += offset;
@@ -128,7 +128,7 @@ opLOOPE_w(uint32_t fetchdat)
 {
     int8_t offset = (int8_t) getbytef();
     CX--;
-    CLOCK_CYCLES((is486) ? 7 : 11);
+    CLOCK_CYCLES(7);
     PREFETCH_RUN(11, 2, -1, 0, 0, 0, 0, 0);
     if (CX && ZF_SET()) {
         cpu_state.pc += offset;
@@ -145,7 +145,7 @@ opLOOPE_l(uint32_t fetchdat)
 {
     int8_t offset = (int8_t) getbytef();
     ECX--;
-    CLOCK_CYCLES((is486) ? 7 : 11);
+    CLOCK_CYCLES(7);
     PREFETCH_RUN(11, 2, -1, 0, 0, 0, 0, 0);
     if (ECX && ZF_SET()) {
         cpu_state.pc += offset;
@@ -163,7 +163,7 @@ opLOOP_w(uint32_t fetchdat)
 {
     int8_t offset = (int8_t) getbytef();
     CX--;
-    CLOCK_CYCLES((is486) ? 7 : 11);
+    CLOCK_CYCLES(7);
     PREFETCH_RUN(11, 2, -1, 0, 0, 0, 0, 0);
     if (CX) {
         cpu_state.pc += offset;
@@ -180,7 +180,7 @@ opLOOP_l(uint32_t fetchdat)
 {
     int8_t offset = (int8_t) getbytef();
     ECX--;
-    CLOCK_CYCLES((is486) ? 7 : 11);
+    CLOCK_CYCLES(7);
     PREFETCH_RUN(11, 2, -1, 0, 0, 0, 0, 0);
     if (ECX) {
         cpu_state.pc += offset;
@@ -238,7 +238,7 @@ opJMP_r8(uint32_t fetchdat)
     if (!(cpu_state.op32 & 0x100))
         cpu_state.pc &= 0xffff;
     CPU_BLOCK_END();
-    CLOCK_CYCLES((is486) ? 3 : 7);
+    CLOCK_CYCLES(3);
     PREFETCH_RUN(7, 2, -1, 0, 0, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -250,7 +250,7 @@ opJMP_r16(uint32_t fetchdat)
     cpu_state.pc += offset;
     cpu_state.pc &= 0xffff;
     CPU_BLOCK_END();
-    CLOCK_CYCLES((is486) ? 3 : 7);
+    CLOCK_CYCLES(3);
     PREFETCH_RUN(7, 3, -1, 0, 0, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -263,7 +263,7 @@ opJMP_r32(UNUSED(uint32_t fetchdat))
         return 1;
     cpu_state.pc += offset;
     CPU_BLOCK_END();
-    CLOCK_CYCLES((is486) ? 3 : 7);
+    CLOCK_CYCLES(3);
     PREFETCH_RUN(7, 5, -1, 0, 0, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -317,7 +317,7 @@ opCALL_r16(uint32_t fetchdat)
     cpu_state.pc += addr;
     cpu_state.pc &= 0xffff;
     CPU_BLOCK_END();
-    CLOCK_CYCLES((is486) ? 3 : 7);
+    CLOCK_CYCLES(3);
     PREFETCH_RUN(7, 3, -1, 0, 0, 1, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -332,7 +332,7 @@ opCALL_r32(UNUSED(uint32_t fetchdat))
     PUSH_L(cpu_state.pc);
     cpu_state.pc += addr;
     CPU_BLOCK_END();
-    CLOCK_CYCLES((is486) ? 3 : 7);
+    CLOCK_CYCLES(3);
     PREFETCH_RUN(7, 5, -1, 0, 0, 0, 1, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -349,7 +349,7 @@ opRET_w(UNUSED(uint32_t fetchdat))
     cpu_state.pc = ret;
     CPU_BLOCK_END();
 
-    CLOCK_CYCLES((is486) ? 5 : 10);
+    CLOCK_CYCLES(5);
     PREFETCH_RUN(10, 1, -1, 1, 0, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -365,7 +365,7 @@ opRET_l(UNUSED(uint32_t fetchdat))
     cpu_state.pc = ret;
     CPU_BLOCK_END();
 
-    CLOCK_CYCLES((is486) ? 5 : 10);
+    CLOCK_CYCLES(5);
     PREFETCH_RUN(10, 1, -1, 0, 1, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -387,7 +387,7 @@ opRET_w_imm(uint32_t fetchdat)
     cpu_state.pc = ret;
     CPU_BLOCK_END();
 
-    CLOCK_CYCLES((is486) ? 5 : 10);
+    CLOCK_CYCLES(5);
     PREFETCH_RUN(10, 5, -1, 1, 0, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;
@@ -408,7 +408,7 @@ opRET_l_imm(uint32_t fetchdat)
     cpu_state.pc = ret;
     CPU_BLOCK_END();
 
-    CLOCK_CYCLES((is486) ? 5 : 10);
+    CLOCK_CYCLES(5);
     PREFETCH_RUN(10, 5, -1, 0, 1, 0, 0, 0);
     PREFETCH_FLUSH();
     return 0;

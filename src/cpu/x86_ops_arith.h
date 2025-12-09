@@ -348,11 +348,7 @@ opCMP_b_rmw_a16(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     setsub8(dst, getr8(cpu_reg));
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
     return 0;
 }
@@ -368,11 +364,7 @@ opCMP_b_rmw_a32(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     setsub8(dst, getr8(cpu_reg));
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
     return 0;
 }
@@ -389,11 +381,7 @@ opCMP_w_rmw_a16(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     setsub16(dst, cpu_state.regs[cpu_reg].w);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
     return 0;
 }
@@ -409,11 +397,7 @@ opCMP_w_rmw_a32(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     setsub16(dst, cpu_state.regs[cpu_reg].w);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
     return 0;
 }
@@ -430,11 +414,7 @@ opCMP_l_rmw_a16(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     setsub32(dst, cpu_state.regs[cpu_reg].l);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
     return 0;
 }
@@ -450,11 +430,7 @@ opCMP_l_rmw_a32(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     setsub32(dst, cpu_state.regs[cpu_reg].l);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
     return 0;
 }
@@ -607,11 +583,7 @@ opTEST_b_a16(uint32_t fetchdat)
         return 1;
     temp2 = getr8(cpu_reg);
     setznp8(temp & temp2);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
     return 0;
 }
@@ -629,11 +601,7 @@ opTEST_b_a32(uint32_t fetchdat)
         return 1;
     temp2 = getr8(cpu_reg);
     setznp8(temp & temp2);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
     return 0;
 }
@@ -652,11 +620,7 @@ opTEST_w_a16(uint32_t fetchdat)
         return 1;
     temp2 = cpu_state.regs[cpu_reg].w;
     setznp16(temp & temp2);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
     return 0;
 }
@@ -674,11 +638,7 @@ opTEST_w_a32(uint32_t fetchdat)
         return 1;
     temp2 = cpu_state.regs[cpu_reg].w;
     setznp16(temp & temp2);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
     return 0;
 }
@@ -697,11 +657,7 @@ opTEST_l_a16(uint32_t fetchdat)
         return 1;
     temp2 = cpu_state.regs[cpu_reg].l;
     setznp32(temp & temp2);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
     return 0;
 }
@@ -719,11 +675,7 @@ opTEST_l_a32(uint32_t fetchdat)
         return 1;
     temp2 = cpu_state.regs[cpu_reg].l;
     setznp32(temp & temp2);
-    if (is486) {
-        CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
-    } else {
-        CLOCK_CYCLES((cpu_mod == 3) ? 2 : 5);
-    }
+    CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);
     PREFETCH_RUN((cpu_mod == 3) ? timing_rr : timing_rm, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
     return 0;
 }
@@ -819,11 +771,7 @@ opTEST_EAX(UNUSED(uint32_t fetchdat))
             break;                                                \
         case 0x38: /*CMP ea, #*/                                  \
             setsub##flag_width(dst, src);                         \
-            if (is486) {                                          \
-                CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);             \
-            } else {                                              \
-                CLOCK_CYCLES((cpu_mod == 3) ? 2 : 7);             \
-            }                                                     \
+            CLOCK_CYCLES((cpu_mod == 3) ? 1 : 2);                 \
             break;                                                \
     }
 

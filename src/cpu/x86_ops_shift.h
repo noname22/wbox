@@ -26,8 +26,7 @@
                     break;                                                                                                       \
                 case 0x10: /*RCL b,CL*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 1 : 0;                                                                                   \
                         temp2 = temp & 0x80;                                                                                     \
@@ -47,8 +46,7 @@
                     break;                                                                                                       \
                 case 0x18: /*RCR b,CL*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 0x80 : 0;                                                                                \
                         temp2 = temp & 1;                                                                                        \
@@ -122,8 +120,7 @@
                     break;                                                                                                       \
                 case 0x10: /*RCL w, c*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 1 : 0;                                                                                   \
                         temp2 = temp & 0x8000;                                                                                   \
@@ -143,8 +140,7 @@
                     break;                                                                                                       \
                 case 0x18: /*RCR w, c*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 0x8000 : 0;                                                                              \
                         temp2 = temp & 1;                                                                                        \
@@ -218,8 +214,7 @@
                     break;                                                                                                       \
                 case 0x10: /*RCL l, c*/                                                                                          \
                     temp2 = CF_SET();                                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 1 : 0;                                                                                   \
                         temp2 = temp & 0x80000000;                                                                               \
@@ -239,8 +234,7 @@
                     break;                                                                                                       \
                 case 0x18: /*RCR l, c*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 0x80000000 : 0;                                                                          \
                         temp2 = temp & 1;                                                                                        \
@@ -322,8 +316,7 @@
                     break;                                                                                                       \
                 case 0x10: /*RCL b,CL*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 1 : 0;                                                                                   \
                         temp2 = temp & 0x80;                                                                                     \
@@ -343,8 +336,7 @@
                     break;                                                                                                       \
                 case 0x18: /*RCR b,CL*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 0x80 : 0;                                                                                \
                         temp2 = temp & 1;                                                                                        \
@@ -426,8 +418,7 @@
                     break;                                                                                                       \
                 case 0x10: /*RCL w, c*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 1 : 0;                                                                                   \
                         temp2 = temp & 0x8000;                                                                                   \
@@ -447,8 +438,7 @@
                     break;                                                                                                       \
                 case 0x18: /*RCR w, c*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 0x8000 : 0;                                                                              \
                         temp2 = temp & 1;                                                                                        \
@@ -530,8 +520,7 @@
                     break;                                                                                                       \
                 case 0x10: /*RCL l, c*/                                                                                          \
                     temp2 = CF_SET();                                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 1 : 0;                                                                                   \
                         temp2 = temp & 0x80000000;                                                                               \
@@ -551,8 +540,7 @@
                     break;                                                                                                       \
                 case 0x18: /*RCR l, c*/                                                                                          \
                     temp2 = cpu_state.flags & C_FLAG;                                                                            \
-                    if (is486)                                                                                                   \
-                        CLOCK_CYCLES_ALWAYS(c);                                                                                  \
+                    CLOCK_CYCLES_ALWAYS(c);                                                                                  \
                     while (c > 0) {                                                                                              \
                         tempc = temp2 ? 0x80000000 : 0;                                                                          \
                         temp2 = temp & 1;                                                                                        \

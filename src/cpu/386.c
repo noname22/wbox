@@ -263,8 +263,7 @@ exec386_2386(int32_t cycs)
             if ((ol == 3) && opcode_has_modrm[fetchdat & 0xff] && (((fetchdat >> 14) & 0x03) == 0x03))
                 ol = 2;
 
-            if (is386)
-                ins_fetch_fault = cpu_386_check_instruction_fault();
+            ins_fetch_fault = cpu_386_check_instruction_fault();
 
             /* Breakpoint fault has priority over other faults. */
             if ((cpu_state.abrt == 0) & ins_fetch_fault) {
@@ -272,8 +271,6 @@ exec386_2386(int32_t cycs)
                 ins_fetch_fault = 0;
                 /* No instructions executed at this point. */
                 goto block_ended;
-            } else if (cpu_16bitbus) {
-                CHECK_READ_CS(MIN(ol, 2));
             } else {
                 CHECK_READ_CS(MIN(ol, 4));
             }
@@ -339,7 +336,7 @@ block_ended:
                     }
                 }
 
-                if (is386 && !x86_was_reset  && ins_fetch_fault)
+                if (!x86_was_reset && ins_fetch_fault)
                     x86gen();
             } else if (new_ne) {
                 flags_rebuild();

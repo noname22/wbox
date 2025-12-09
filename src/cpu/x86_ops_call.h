@@ -299,11 +299,7 @@ opFF_w_a16(uint32_t fetchdat)
             PUSH_W(cpu_state.pc);
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN((cpu_mod == 3) ? 7 : 10, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 1, 0, 0);
             PREFETCH_FLUSH();
             break;
@@ -336,11 +332,7 @@ opFF_w_a16(uint32_t fetchdat)
                 return 1;
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN((cpu_mod == 3) ? 7 : 10, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
             PREFETCH_FLUSH();
             break;
@@ -461,11 +453,7 @@ opFF_w_a32(uint32_t fetchdat)
             PUSH_W(cpu_state.pc);
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN((cpu_mod == 3) ? 7 : 10, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 1, 0, 1);
             PREFETCH_FLUSH();
             break;
@@ -498,11 +486,7 @@ opFF_w_a32(uint32_t fetchdat)
                 return 1;
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN(cycles_old - cycles, 2, rmdat, 1, 0, 0, 0, 1);
             PREFETCH_FLUSH();
             break;
@@ -624,11 +608,7 @@ opFF_l_a16(uint32_t fetchdat)
             PUSH_L(cpu_state.pc);
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN((cpu_mod == 3) ? 7 : 10, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 1, 0);
             PREFETCH_FLUSH();
             break;
@@ -661,11 +641,7 @@ opFF_l_a16(uint32_t fetchdat)
                 return 1;
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN(cycles_old - cycles, 2, rmdat, 0, 1, 0, 0, 0);
             PREFETCH_FLUSH();
             break;
@@ -788,11 +764,7 @@ opFF_l_a32(uint32_t fetchdat)
                 return 1;
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN((cpu_mod == 3) ? 7 : 10, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 1, 1);
             PREFETCH_FLUSH();
             break;
@@ -825,11 +797,7 @@ opFF_l_a32(uint32_t fetchdat)
                 return 1;
             cpu_state.pc = new_pc;
             CPU_BLOCK_END();
-            if (is486) {
-                CLOCK_CYCLES(5);
-            } else {
-                CLOCK_CYCLES((cpu_mod == 3) ? 7 : 10);
-            }
+            CLOCK_CYCLES(5);
             PREFETCH_RUN(cycles_old - cycles, 2, rmdat, 1, 1, 0, 0, 1);
             PREFETCH_FLUSH();
             break;

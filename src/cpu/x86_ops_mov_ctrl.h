@@ -11,14 +11,7 @@ opMOV_r_CRx_a16(uint32_t fetchdat)
             cpu_state.regs[cpu_rm].l = cr0;
             if (cpu_flush_pending)
                 cpu_state.regs[cpu_rm].l ^= 0x80000000;
-            if (is486 || isibm486)
-                cpu_state.regs[cpu_rm].l |= 0x10; /*ET hardwired on 486*/
-            else {
-                if (is386)
-                    cpu_state.regs[cpu_rm].l |= 0x7fffffe0;
-                else
-                    cpu_state.regs[cpu_rm].l |= 0x7ffffff0;
-            }
+            cpu_state.regs[cpu_rm].l |= 0x10; /*ET hardwired on 486*/
             break;
         case 2:
             cpu_state.regs[cpu_rm].l = cr2;
@@ -53,14 +46,7 @@ opMOV_r_CRx_a32(uint32_t fetchdat)
             cpu_state.regs[cpu_rm].l = cr0;
             if (cpu_flush_pending)
                 cpu_state.regs[cpu_rm].l ^= 0x80000000;
-            if (is486 || isibm486)
-                cpu_state.regs[cpu_rm].l |= 0x10; /*ET hardwired on 486*/
-            else {
-                if (is386)
-                    cpu_state.regs[cpu_rm].l |= 0x7fffffe0;
-                else
-                    cpu_state.regs[cpu_rm].l |= 0x7ffffff0;
-            }
+            cpu_state.regs[cpu_rm].l |= 0x10; /*ET hardwired on 486*/
             break;
         case 2:
             cpu_state.regs[cpu_rm].l = cr2;
@@ -186,26 +172,18 @@ opMOV_CRx_r_a16(uint32_t fetchdat)
         case 0:
             if ((cpu_state.regs[cpu_rm].l ^ cr0) & 0x00000001)
                 flushmmucache();
-            else if ((cpu_state.regs[cpu_rm].l ^ cr0) & 0x80000000) {
-                if (is_p6 || cpu_use_dynarec)
-                    flushmmucache();
-                else {
-                    flushmmucache_nopc();
-                    cpu_flush_pending = 1;
-                }
-            } else if ((cpu_state.regs[cpu_rm].l ^ cr0) & WP_FLAG)
+            else if ((cpu_state.regs[cpu_rm].l ^ cr0) & 0x80000000)
+                flushmmucache(); else if ((cpu_state.regs[cpu_rm].l ^ cr0) & WP_FLAG)
                 flushmmucache_write();
             /* Make sure CPL = 0 when switching from real mode to protected mode. */
             if ((cpu_state.regs[cpu_rm].l & 0x01) && !(cr0 & 0x01))
                 cpu_state.seg_cs.access &= 0x9f;
             cr0 = cpu_state.regs[cpu_rm].l;
-            if (cpu_16bitbus)
-                cr0 |= 0x10;
-            if (hascache && !(cr0 & (1 << 30)))
+            if (!(cr0 & (1 << 30)))
                 cpu_cache_int_enabled = 1;
             else
                 cpu_cache_int_enabled = 0;
-            if (hascache && ((cr0 ^ old_cr0) & (1 << 30)))
+            if ((cr0 ^ old_cr0) & (1 << 30))
                 cpu_update_waitstates();
             if (cr0 & 1)
                 cpu_cur_status |= CPU_STATUS_PMODE;
@@ -250,26 +228,18 @@ opMOV_CRx_r_a32(uint32_t fetchdat)
         case 0:
             if ((cpu_state.regs[cpu_rm].l ^ cr0) & 0x00000001)
                 flushmmucache();
-            else if ((cpu_state.regs[cpu_rm].l ^ cr0) & 0x80000000) {
-                if (is_p6 || cpu_use_dynarec)
-                    flushmmucache();
-                else {
-                    flushmmucache_nopc();
-                    cpu_flush_pending = 1;
-                }
-            } else if ((cpu_state.regs[cpu_rm].l ^ cr0) & WP_FLAG)
+            else if ((cpu_state.regs[cpu_rm].l ^ cr0) & 0x80000000)
+                flushmmucache(); else if ((cpu_state.regs[cpu_rm].l ^ cr0) & WP_FLAG)
                 flushmmucache_write();
             /* Make sure CPL = 0 when switching from real mode to protected mode. */
             if ((cpu_state.regs[cpu_rm].l & 0x01) && !(cr0 & 0x01))
                 cpu_state.seg_cs.access &= 0x9f;
             cr0 = cpu_state.regs[cpu_rm].l;
-            if (cpu_16bitbus)
-                cr0 |= 0x10;
-            if (hascache && !(cr0 & (1 << 30)))
+            if (!(cr0 & (1 << 30)))
                 cpu_cache_int_enabled = 1;
             else
                 cpu_cache_int_enabled = 0;
-            if (hascache && ((cr0 ^ old_cr0) & (1 << 30)))
+            if ((cr0 ^ old_cr0) & (1 << 30))
                 cpu_update_waitstates();
             if (cr0 & 1)
                 cpu_cur_status |= CPU_STATUS_PMODE;

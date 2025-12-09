@@ -918,8 +918,7 @@ exec386(int32_t cycs)
             cpu_state.ssegs  = 0;
 
 #ifdef USE_DEBUG_REGS_486
-            if (is386)
-                ins_fetch_fault = cpu_386_check_instruction_fault();
+            ins_fetch_fault = cpu_386_check_instruction_fault();
 
             /* Breakpoint fault has priority over other faults. */
             if ((cpu_state.abrt == 0) & ins_fetch_fault) {
@@ -1002,7 +1001,7 @@ block_ended:
                 }
 
 #ifdef USE_DEBUG_REGS_486
-                if (is386 && !x86_was_reset  && ins_fetch_fault)
+                if (!x86_was_reset && ins_fetch_fault)
                     x86gen();
 #endif
             } else if (new_ne) {

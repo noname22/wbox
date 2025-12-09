@@ -177,7 +177,7 @@
                                                                                                                   \
     static int opREP_MOVSB_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         addr64 = addr64_2 = 0x00000000;                                                                           \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
@@ -212,7 +212,7 @@
                 SRC_REG++;                                                                                        \
             }                                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 3 : 4;                                                                              \
+            cycles -= 3;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -225,7 +225,7 @@
     }                                                                                                             \
     static int opREP_MOVSW_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         addr64a[0] = addr64a[1] = 0x00000000;                                                                     \
         addr64a_2[0] = addr64a_2[1] = 0x00000000;                                                                 \
         if (trap)                                                                                                 \
@@ -261,7 +261,7 @@
                 SRC_REG += 2;                                                                                     \
             }                                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 3 : 4;                                                                              \
+            cycles -= 3;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -274,7 +274,7 @@
     }                                                                                                             \
     static int opREP_MOVSL_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         addr64a[0] = addr64a[1] = addr64a[2] = addr64a[3] = 0x00000000;                                           \
         addr64a_2[0] = addr64a_2[1] = addr64a_2[2] = addr64a_2[3] = 0x00000000;                                   \
         if (trap)                                                                                                 \
@@ -310,7 +310,7 @@
                 SRC_REG += 4;                                                                                     \
             }                                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 3 : 4;                                                                              \
+            cycles -= 3;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -324,7 +324,7 @@
                                                                                                                   \
     static int opREP_STOSB_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
         if (CNT_REG > 0)                                                                                          \
@@ -339,7 +339,7 @@
             else                                                                                                  \
                 DEST_REG++;                                                                                       \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 4 : 5;                                                                              \
+            cycles -= 4;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -352,7 +352,7 @@
     }                                                                                                             \
     static int opREP_STOSW_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
         if (CNT_REG > 0)                                                                                          \
@@ -367,7 +367,7 @@
             else                                                                                                  \
                 DEST_REG += 2;                                                                                    \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 4 : 5;                                                                              \
+            cycles -= 4;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -380,7 +380,7 @@
     }                                                                                                             \
     static int opREP_STOSL_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
         if (CNT_REG > 0)                                                                                          \
@@ -395,7 +395,7 @@
             else                                                                                                  \
                 DEST_REG += 4;                                                                                    \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 4 : 5;                                                                              \
+            cycles -= 4;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -409,7 +409,7 @@
                                                                                                                   \
     static int opREP_LODSB_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
         if (CNT_REG > 0)                                                                                          \
@@ -424,7 +424,7 @@
             else                                                                                                  \
                 SRC_REG++;                                                                                        \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 4 : 5;                                                                              \
+            cycles -= 4;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -437,7 +437,7 @@
     }                                                                                                             \
     static int opREP_LODSW_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
         if (CNT_REG > 0)                                                                                          \
@@ -452,7 +452,7 @@
             else                                                                                                  \
                 SRC_REG += 2;                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 4 : 5;                                                                              \
+            cycles -= 4;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -465,7 +465,7 @@
     }                                                                                                             \
     static int opREP_LODSL_##size(UNUSED(uint32_t fetchdat))                                                      \
     {                                                                                                             \
-        int cycles_end = cycles - ((is386 && cpu_use_dynarec) ? 1000 : 100);                                      \
+        int cycles_end = cycles - (cpu_use_dynarec ? 1000 : 100);                                      \
         if (trap)                                                                                                 \
             cycles_end = cycles + 1; /*Force the instruction to end after only one iteration when trap flag set*/ \
         if (CNT_REG > 0)                                                                                          \
@@ -480,7 +480,7 @@
             else                                                                                                  \
                 SRC_REG += 4;                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 4 : 5;                                                                              \
+            cycles -= 4;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -534,7 +534,7 @@
                 SRC_REG++;                                                                                        \
             }                                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 7 : 9;                                                                              \
+            cycles -= 7;                                                                              \
             setsub8(temp, temp2);                                                                                 \
             tempz = (ZF_SET()) ? 1 : 0;                                                                           \
         }                                                                                                         \
@@ -585,7 +585,7 @@
                 SRC_REG += 2;                                                                                     \
             }                                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 7 : 9;                                                                              \
+            cycles -= 7;                                                                              \
             setsub16(temp, temp2);                                                                                \
             tempz = (ZF_SET()) ? 1 : 0;                                                                           \
         }                                                                                                         \
@@ -636,7 +636,7 @@
                 SRC_REG += 4;                                                                                     \
             }                                                                                                     \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 7 : 9;                                                                              \
+            cycles -= 7;                                                                              \
             setsub32(temp, temp2);                                                                                \
             tempz = (ZF_SET()) ? 1 : 0;                                                                           \
         }                                                                                                         \
@@ -669,7 +669,7 @@
             else                                                                                                  \
                 DEST_REG++;                                                                                       \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 5 : 8;                                                                              \
+            cycles -= 5;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -701,7 +701,7 @@
             else                                                                                                  \
                 DEST_REG += 2;                                                                                    \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 5 : 8;                                                                              \
+            cycles -= 5;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \
@@ -733,7 +733,7 @@
             else                                                                                                  \
                 DEST_REG += 4;                                                                                    \
             CNT_REG--;                                                                                            \
-            cycles -= is486 ? 5 : 8;                                                                              \
+            cycles -= 5;                                                                              \
             if (cycles < cycles_end)                                                                              \
                 break;                                                                                            \
         }                                                                                                         \

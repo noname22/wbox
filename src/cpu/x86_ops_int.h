@@ -12,7 +12,7 @@ opINT3(UNUSED(uint32_t fetchdat))
         return 1;
     }
     x86_int_sw(3);
-    CLOCK_CYCLES((is486) ? 44 : 59);
+    CLOCK_CYCLES(44);
     PREFETCH_RUN(cycles_old - cycles, 1, -1, 0, 0, 0, 0, 0);
     return 1;
 }
@@ -27,7 +27,7 @@ opINT1(UNUSED(uint32_t fetchdat))
         return 1;
     }
     x86_int_sw(1);
-    CLOCK_CYCLES((is486) ? 44 : 59);
+    CLOCK_CYCLES(44);
     PREFETCH_RUN(cycles_old - cycles, 1, -1, 0, 0, 0, 0, 0);
     return 1;
 }

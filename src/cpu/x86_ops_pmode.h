@@ -21,8 +21,8 @@ opARPL_a16(uint32_t fetchdat)
     } else
         cpu_state.flags &= ~Z_FLAG;
 
-    CLOCK_CYCLES(is486 ? 9 : 20);
-    PREFETCH_RUN(is486 ? 9 : 20, 2, rmdat, 1, 0, 1, 0, 0);
+    CLOCK_CYCLES(9);
+    PREFETCH_RUN(9, 2, rmdat, 1, 0, 1, 0, 0);
     return 0;
 }
 static int
@@ -48,8 +48,8 @@ opARPL_a32(uint32_t fetchdat)
     } else
         cpu_state.flags &= ~Z_FLAG;
 
-    CLOCK_CYCLES(is486 ? 9 : 20);
-    PREFETCH_RUN(is486 ? 9 : 20, 2, rmdat, 1, 0, 1, 0, 1);
+    CLOCK_CYCLES(9);
+    PREFETCH_RUN(9, 2, rmdat, 1, 0, 1, 0, 1);
     return 0;
 }
 
@@ -359,7 +359,7 @@ op0F00_a32(uint32_t fetchdat)
 }
 
 static int
-op0F01_common(UNUSED(uint32_t fetchdat), int is32, int is286, UNUSED(int ea32))
+op0F01_common(UNUSED(uint32_t fetchdat), int is32, UNUSED(int ea32))
 {
     uint32_t base;
     uint16_t limit;
@@ -371,9 +371,7 @@ op0F01_common(UNUSED(uint32_t fetchdat), int is32, int is286, UNUSED(int ea32))
             if (cpu_mod != 3)
                 SEG_CHECK_WRITE(cpu_state.ea_seg);
             seteaw(gdt.limit);
-            base = gdt.base; // is32 ? gdt.base : (gdt.base & 0xffffff);
-            if (is286)
-                base |= 0xff000000;
+            base = gdt.base;
             writememl(easeg, cpu_state.eaaddr + 2, base);
             CLOCK_CYCLES(7);
             PREFETCH_RUN(7, 2, rmdat, 0, 0, 1, 1, ea32);
@@ -383,8 +381,6 @@ op0F01_common(UNUSED(uint32_t fetchdat), int is32, int is286, UNUSED(int ea32))
                 SEG_CHECK_WRITE(cpu_state.ea_seg);
             seteaw(idt.limit);
             base = idt.base;
-            if (is286)
-                base |= 0xff000000;
             writememl(easeg, cpu_state.eaaddr + 2, base);
             CLOCK_CYCLES(7);
             PREFETCH_RUN(7, 2, rmdat, 0, 0, 1, 1, ea32);
@@ -430,21 +426,10 @@ op0F01_common(UNUSED(uint32_t fetchdat), int is32, int is286, UNUSED(int ea32))
         case 0x20: /*SMSW*/
             if (cpu_mod != 3)
                 SEG_CHECK_WRITE(cpu_state.ea_seg);
-            if (is386 && is32 && (cpu_mod == 3)) {
-                if (is486 || isibm486)
-                    seteaw(cr0);
-                else if (is386 && !cpu_16bitbus)
-                    seteaw(cr0 | /* 0x7FFFFF00 */ 0x7FFFFFE0);
-                else
-                    seteaw(cr0 | 0x7FFFFFF0);
-            } else {
-                if (is486 || isibm486)
-                    seteaw(msw);
-                else if (is386 && !cpu_16bitbus)
-                    seteaw(msw | /* 0xFF00 */ 0xFFE0);
-                else
-                    seteaw(msw | 0xFFF0);
-            }
+            if (is32 && (cpu_mod == 3))
+                seteaw(cr0);
+            else
+                seteaw(msw);
             CLOCK_CYCLES(2);
             PREFETCH_RUN(2, 2, rmdat, 0, 0, (cpu_mod == 3) ? 0 : 1, 0, ea32);
             break;
@@ -460,11 +445,8 @@ op0F01_common(UNUSED(uint32_t fetchdat), int is32, int is286, UNUSED(int ea32))
                 return 1;
             if (msw & 1)
                 tempw |= 1;
-            if (is386) {
-                tempw &= ~0x10;
-                tempw |= (msw & 0x10);
-            } else
-                tempw &= 0xF;
+            tempw &= ~0x10;
+            tempw |= (msw & 0x10);
             msw = tempw;
             if (msw & 1)
                 cpu_cur_status |= CPU_STATUS_PMODE;
@@ -474,17 +456,15 @@ op0F01_common(UNUSED(uint32_t fetchdat), int is32, int is286, UNUSED(int ea32))
             break;
 
         case 0x38: /*INVLPG*/
-            if (is486 || isibm486) {
-                if ((CPL || cpu_state.eflags & VM_FLAG) && (cr0 & 1)) {
-                    x86gpf(NULL, 0);
-                    break;
-                }
-                SEG_CHECK_READ(cpu_state.ea_seg);
-                flushmmucache_nopc();
-                CLOCK_CYCLES(12);
-                PREFETCH_RUN(12, 2, rmdat, 0, 0, 0, 0, ea32);
+            if ((CPL || cpu_state.eflags & VM_FLAG) && (cr0 & 1)) {
+                x86gpf(NULL, 0);
                 break;
             }
+            SEG_CHECK_READ(cpu_state.ea_seg);
+            flushmmucache_nopc();
+            CLOCK_CYCLES(12);
+            PREFETCH_RUN(12, 2, rmdat, 0, 0, 0, 0, ea32);
+            break;
 
         default:
             cpu_state.pc -= 3;
@@ -499,34 +479,26 @@ op0F01_w_a16(uint32_t fetchdat)
 {
     fetch_ea_16(fetchdat);
 
-    return op0F01_common(fetchdat, 0, 0, 0);
+    return op0F01_common(fetchdat, 0, 0);
 }
 static int
 op0F01_w_a32(uint32_t fetchdat)
 {
     fetch_ea_32(fetchdat);
 
-    return op0F01_common(fetchdat, 0, 0, 1);
+    return op0F01_common(fetchdat, 0, 1);
 }
 static int
 op0F01_l_a16(uint32_t fetchdat)
 {
     fetch_ea_16(fetchdat);
 
-    return op0F01_common(fetchdat, 1, 0, 0);
+    return op0F01_common(fetchdat, 1, 0);
 }
 static int
 op0F01_l_a32(uint32_t fetchdat)
 {
     fetch_ea_32(fetchdat);
 
-    return op0F01_common(fetchdat, 1, 0, 1);
-}
-
-static int
-op0F01_286(uint32_t fetchdat)
-{
-    fetch_ea_16(fetchdat);
-
-    return op0F01_common(fetchdat, 0, 1, 0);
+    return op0F01_common(fetchdat, 1, 1);
 }

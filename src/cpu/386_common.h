@@ -471,7 +471,7 @@ fastreadl_fetch(uint32_t a)
 {
     uint32_t ret;
 
-    if (cpu_16bitbus || ((a & 0xFFF) > 0xFFC)) {
+    if ((a & 0xFFF) > 0xFFC) {
         ret = fastreadw_fetch(a);
         if (!cpu_state.abrt && (opcode_length[ret & 0xff] > 2))
             ret |= ((uint32_t) fastreadw(a + 2) << 16);

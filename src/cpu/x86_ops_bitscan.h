@@ -47,11 +47,11 @@ opBSF_w_a16(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
 
-    BS_common(0, 16, 1, cpu_state.regs[cpu_reg].w, (is486) ? 1 : 3);
+    BS_common(0, 16, 1, cpu_state.regs[cpu_reg].w, 1);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
 #endif
     return 0;
@@ -71,11 +71,11 @@ opBSF_w_a32(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
 
-    BS_common(0, 16, 1, cpu_state.regs[cpu_reg].w, (is486) ? 1 : 3);
+    BS_common(0, 16, 1, cpu_state.regs[cpu_reg].w, 1);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
 #endif
     return 0;
@@ -95,11 +95,11 @@ opBSF_l_a16(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
 
-    BS_common(0, 32, 1, cpu_state.regs[cpu_reg].l, (is486) ? 1 : 3);
+    BS_common(0, 32, 1, cpu_state.regs[cpu_reg].l, 1);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
 #endif
     return 0;
@@ -119,11 +119,11 @@ opBSF_l_a32(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
 
-    BS_common(0, 32, 1, cpu_state.regs[cpu_reg].l, (is486) ? 1 : 3);
+    BS_common(0, 32, 1, cpu_state.regs[cpu_reg].l, 1);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
 #endif
     return 0;
@@ -146,9 +146,9 @@ opBSR_w_a16(uint32_t fetchdat)
 
     BS_common(15, -1, -1, cpu_state.regs[cpu_reg].w, 3);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 0);
 #endif
     return 0;
@@ -170,9 +170,9 @@ opBSR_w_a32(uint32_t fetchdat)
 
     BS_common(15, -1, -1, cpu_state.regs[cpu_reg].w, 3);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, (cpu_mod == 3) ? 0 : 1, 0, 0, 0, 1);
 #endif
     return 0;
@@ -194,9 +194,9 @@ opBSR_l_a16(uint32_t fetchdat)
 
     BS_common(31, -1, -1, cpu_state.regs[cpu_reg].l, 3);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 0);
 #endif
     return 0;
@@ -218,9 +218,9 @@ opBSR_l_a32(uint32_t fetchdat)
 
     BS_common(31, -1, -1, cpu_state.regs[cpu_reg].l, 3);
 
-    CLOCK_CYCLES((is486) ? 6 : 10);
+    CLOCK_CYCLES(6);
 #ifndef IS_DYNAREC
-    instr_cycles += ((is486) ? 6 : 10);
+    instr_cycles += (6);
     PREFETCH_RUN(instr_cycles, 2, rmdat, 0, (cpu_mod == 3) ? 0 : 1, 0, 0, 1);
 #endif
     return 0;

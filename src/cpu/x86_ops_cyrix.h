@@ -323,7 +323,7 @@ opRDSHR_a16(UNUSED(uint32_t fetchdat))
         } else {
             SEG_CHECK_WRITE(cpu_state.ea_seg);
             seteal(cyrix.smhr);
-            CLOCK_CYCLES(is486 ? 1 : 2);
+            CLOCK_CYCLES(1);
             PREFETCH_RUN(2, 2, rmdat, 0, 0, 0, 1, 0);
         }
         return cpu_state.abrt;
@@ -350,7 +350,7 @@ opRDSHR_a32(UNUSED(uint32_t fetchdat))
         } else {
             SEG_CHECK_WRITE(cpu_state.ea_seg);
             seteal(cyrix.smhr);
-            CLOCK_CYCLES(is486 ? 1 : 2);
+            CLOCK_CYCLES(1);
             PREFETCH_RUN(2, 2, rmdat, 0, 0, 0, 1, 1);
         }
         return cpu_state.abrt;
@@ -383,7 +383,7 @@ opWRSHR_a16(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             cyrix.smhr = temp;
-            CLOCK_CYCLES(is486 ? 1 : 4);
+            CLOCK_CYCLES(1);
             PREFETCH_RUN(4, 2, rmdat, 0, 1, 0, 0, 0);
         }
         return 0;
@@ -415,7 +415,7 @@ opWRSHR_a32(uint32_t fetchdat)
             if (cpu_state.abrt)
                 return 1;
             cyrix.smhr = temp;
-            CLOCK_CYCLES(is486 ? 1 : 4);
+            CLOCK_CYCLES(1);
             PREFETCH_RUN(4, 2, rmdat, 0, 1, 0, 0, 1);
         }
         return 0;

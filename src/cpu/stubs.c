@@ -467,7 +467,7 @@ void gdbstub_cpu_init(void) {}
 /* DMA stubs */
 void dma_init(void) {}
 void dma_reset(void) {}
-void dma_set_at(int is286) { (void)is286; }
+void dma_set_at(int at_mode) { (void)at_mode; }
 
 /* Platform executable memory allocation for dynarec */
 void *plat_mmap(size_t size, uint8_t executable) {
@@ -495,7 +495,6 @@ void plat_munmap(void *ptr, size_t size) {
 }
 
 /* 8086 stubs - we only support 386+ but references exist */
-int is8086 = 0;
 void execx86(int cycs) { (void)cycs; }
 
 /* Device reset */

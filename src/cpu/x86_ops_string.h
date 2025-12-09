@@ -253,8 +253,8 @@ opCMPSB_a16(UNUSED(uint32_t fetchdat))
         DI++;
         SI++;
     }
-    CLOCK_CYCLES((is486) ? 8 : 10);
-    PREFETCH_RUN((is486) ? 8 : 10, 1, -1, 2, 0, 0, 0, 0);
+    CLOCK_CYCLES(8);
+    PREFETCH_RUN(8, 1, -1, 2, 0, 0, 0, 0);
     return 0;
 }
 static int
@@ -294,8 +294,8 @@ opCMPSB_a32(UNUSED(uint32_t fetchdat))
         EDI++;
         ESI++;
     }
-    CLOCK_CYCLES((is486) ? 8 : 10);
-    PREFETCH_RUN((is486) ? 8 : 10, 1, -1, 2, 0, 0, 0, 1);
+    CLOCK_CYCLES(8);
+    PREFETCH_RUN(8, 1, -1, 2, 0, 0, 0, 1);
     return 0;
 }
 
@@ -337,8 +337,8 @@ opCMPSW_a16(UNUSED(uint32_t fetchdat))
         DI += 2;
         SI += 2;
     }
-    CLOCK_CYCLES((is486) ? 8 : 10);
-    PREFETCH_RUN((is486) ? 8 : 10, 1, -1, 2, 0, 0, 0, 0);
+    CLOCK_CYCLES(8);
+    PREFETCH_RUN(8, 1, -1, 2, 0, 0, 0, 0);
     return 0;
 }
 static int
@@ -379,8 +379,8 @@ opCMPSW_a32(UNUSED(uint32_t fetchdat))
         EDI += 2;
         ESI += 2;
     }
-    CLOCK_CYCLES((is486) ? 8 : 10);
-    PREFETCH_RUN((is486) ? 8 : 10, 1, -1, 2, 0, 0, 0, 1);
+    CLOCK_CYCLES(8);
+    PREFETCH_RUN(8, 1, -1, 2, 0, 0, 0, 1);
     return 0;
 }
 
@@ -422,8 +422,8 @@ opCMPSL_a16(UNUSED(uint32_t fetchdat))
         DI += 4;
         SI += 4;
     }
-    CLOCK_CYCLES((is486) ? 8 : 10);
-    PREFETCH_RUN((is486) ? 8 : 10, 1, -1, 0, 2, 0, 0, 0);
+    CLOCK_CYCLES(8);
+    PREFETCH_RUN(8, 1, -1, 0, 2, 0, 0, 0);
     return 0;
 }
 static int
@@ -464,8 +464,8 @@ opCMPSL_a32(UNUSED(uint32_t fetchdat))
         EDI += 4;
         ESI += 4;
     }
-    CLOCK_CYCLES((is486) ? 8 : 10);
-    PREFETCH_RUN((is486) ? 8 : 10, 1, -1, 0, 2, 0, 0, 1);
+    CLOCK_CYCLES(8);
+    PREFETCH_RUN(8, 1, -1, 0, 2, 0, 0, 1);
     return 0;
 }
 
