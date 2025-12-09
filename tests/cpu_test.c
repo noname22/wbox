@@ -75,26 +75,44 @@ static void set_reg32(moo_reg32_t reg, uint32_t value)
     case MOO_REG32_CS:
         cpu_state.seg_cs.seg = value & 0xFFFF;
         cpu_state.seg_cs.base = (value & 0xFFFF) << 4;
+        cpu_state.seg_cs.limit_low = 0;
+        cpu_state.seg_cs.limit_high = 0xFFFF;
+        cpu_state.seg_cs.access = 0x82;  /* Present, readable code segment */
         break;
     case MOO_REG32_DS:
         cpu_state.seg_ds.seg = value & 0xFFFF;
         cpu_state.seg_ds.base = (value & 0xFFFF) << 4;
+        cpu_state.seg_ds.limit_low = 0;
+        cpu_state.seg_ds.limit_high = 0xFFFF;
+        cpu_state.seg_ds.access = 0x82;  /* Present, readable data segment */
         break;
     case MOO_REG32_ES:
         cpu_state.seg_es.seg = value & 0xFFFF;
         cpu_state.seg_es.base = (value & 0xFFFF) << 4;
+        cpu_state.seg_es.limit_low = 0;
+        cpu_state.seg_es.limit_high = 0xFFFF;
+        cpu_state.seg_es.access = 0x82;
         break;
     case MOO_REG32_FS:
         cpu_state.seg_fs.seg = value & 0xFFFF;
         cpu_state.seg_fs.base = (value & 0xFFFF) << 4;
+        cpu_state.seg_fs.limit_low = 0;
+        cpu_state.seg_fs.limit_high = 0xFFFF;
+        cpu_state.seg_fs.access = 0x82;
         break;
     case MOO_REG32_GS:
         cpu_state.seg_gs.seg = value & 0xFFFF;
         cpu_state.seg_gs.base = (value & 0xFFFF) << 4;
+        cpu_state.seg_gs.limit_low = 0;
+        cpu_state.seg_gs.limit_high = 0xFFFF;
+        cpu_state.seg_gs.access = 0x82;
         break;
     case MOO_REG32_SS:
         cpu_state.seg_ss.seg = value & 0xFFFF;
         cpu_state.seg_ss.base = (value & 0xFFFF) << 4;
+        cpu_state.seg_ss.limit_low = 0;
+        cpu_state.seg_ss.limit_high = 0xFFFF;
+        cpu_state.seg_ss.access = 0x82;
         break;
     case MOO_REG32_EIP:
         cpu_state.pc = value;
@@ -181,10 +199,16 @@ static void setup_cpu_state(const moo_cpu_state_t *state)
     }
 }
 
+/* Flags are lazily computed in 86Box. Call flags_rebuild() to materialize them. */
+extern void cpu_386_flags_rebuild(void);
+
 static int compare_cpu_state(const moo_test_t *test)
 {
     const moo_cpu_state_t *final = &test->final_state;
     int mismatches = 0;
+
+    /* Rebuild flags from lazy state before comparison */
+    cpu_386_flags_rebuild();
 
     if (final->regs.is_populated && final->regs.type == MOO_REG_TYPE_32) {
         for (int i = 0; i < MOO_REG32_COUNT; i++) {
@@ -227,7 +251,11 @@ static int compare_cpu_state(const moo_test_t *test)
     return mismatches;
 }
 
-static int run_single_test(const moo_test_t *test)
+extern uint32_t timer_target;
+extern uint64_t tsc;
+extern int32_t cycles_main;
+
+static int run_single_test(const moo_test_t *test, int verbose)
 {
     setup_cpu_state(&test->init_state);
 
@@ -235,8 +263,45 @@ static int run_single_test(const moo_test_t *test)
     cpu_state.pc = moo_test_get_initial_reg32(test, MOO_REG32_EIP);
     cpu_state.oldpc = cpu_state.pc;
 
-    cycles = 1000;
+    /* Set timer_target high so we have enough execution cycles */
+    tsc = 0;
+    timer_target = 0xFFFFFFFF;
+    cycles_main = 0;  /* Reset cycles_main for each test */
+
+    /* Ensure CR0 is in real mode state */
+    cr0 = 0x60000010;  /* CD=1, ET=1, all else 0 - standard real mode */
+
+    /* HLT consumes 100 cycles per iteration, so with low cycles count
+       it will exhaust cycles after the test instruction + one HLT. */
+
+    if (verbose) {
+        uint32_t linear = cpu_state.seg_cs.base + cpu_state.pc;
+        uint32_t eip = cpu_state.pc;
+        extern uint32_t use32;
+        extern const int (*x86_opcodes)[1];  /* Pointer to function pointer array */
+        printf("\n  Initial: CS=%04X base=%08X EIP=%08X linear=%08X use32=%d\n",
+               cpu_state.seg_cs.seg, cpu_state.seg_cs.base, eip, linear, use32);
+        printf("  RAM at linear 0x%X: %02X %02X %02X %02X %02X %02X\n",
+               linear, ram[linear], ram[linear+1], ram[linear+2], ram[linear+3],
+               ram[linear+4], ram[linear+5]);
+        printf("  x86_opcodes=%p\n", (void*)x86_opcodes);
+    }
+
+    cycles = 110;  /* Enough for instruction + one HLT iteration (100 cycles) */
     cpu_exec(1);
+
+    /* HLT instruction decrements PC to stay at HLT for interrupt waiting.
+       But tests expect EIP to be past HLT. Check if we're at HLT and adjust. */
+    {
+        uint32_t linear = cpu_state.seg_cs.base + cpu_state.pc;
+        if (linear < 16 * 1024 * 1024 && ram && ram[linear] == 0xF4) {
+            cpu_state.pc++;  /* Move past HLT for test comparison */
+        }
+    }
+
+    if (verbose) {
+        printf("  Final: EIP=%08X abrt=%d\n", cpu_state.pc, cpu_state.abrt);
+    }
 
     return compare_cpu_state(test);
 }
@@ -274,7 +339,9 @@ static void run_moo_tests(const char *filename, int max_tests)
         printf("Test %zu: %s... ", i, test->name ? test->name : "(unnamed)");
         fflush(stdout);
 
-        int mismatches = run_single_test(test);
+        /* Verbose mode for first few tests and test 4 */
+        int verbose = (i < 3) || (i == 4);
+        int mismatches = run_single_test(test, verbose);
 
         if (mismatches == 0) {
             printf("PASSED\n");

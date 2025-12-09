@@ -43,6 +43,7 @@ set(CPU_SOURCES
     src/cpu/codegen_timing_pentium.c
     src/cpu/codegen_timing_winchip.c
     src/cpu/codegen_timing_winchip2.c
+    src/cpu/mem.c
     src/cpu/stubs.c
 )
 
