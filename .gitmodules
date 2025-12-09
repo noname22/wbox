@@ -1,0 +1,3 @@
+[submodule "ext/80386"]
+	path = ext/80386
+	url = https://github.com/SingleStepTests/80386.git

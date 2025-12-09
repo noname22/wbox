@@ -97,28 +97,38 @@ endif()
 # Softfloat library (C++ files)
 file(GLOB SOFTFLOAT_SOURCES src/cpu/softfloat3e/*.c src/cpu/softfloat3e/*.cc)
 
-add_executable(wbox
-    src/main.c
+# CPU emulation library (shared between main executable and tests)
+add_library(wbox_cpu STATIC
     ${CPU_SOURCES}
     ${CODEGEN_SOURCES}
     ${SOFTFLOAT_SOURCES}
 )
 
-target_include_directories(wbox PRIVATE
+target_include_directories(wbox_cpu PUBLIC
     src/cpu
     src/cpu/codegen
     src/cpu/softfloat3e
 )
 
-# Enable dynarec
-target_compile_definitions(wbox PRIVATE
+target_compile_definitions(wbox_cpu PUBLIC
     USE_DYNAREC
     USE_NEW_DYNAREC
 )
 
-target_link_libraries(wbox PRIVATE SDL3::SDL3)
+add_executable(wbox
+    src/main.c
+)
+
+target_link_libraries(wbox PRIVATE wbox_cpu SDL3::SDL3)
 
 # Warnings
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(wbox PRIVATE -Wall -Wno-unused-variable -Wno-unused-function)
+endif()
+
+# Tests
+option(BUILD_TESTING "Build the testing tree" ON)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
