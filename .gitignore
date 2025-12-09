@@ -1,0 +1,15 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Compiled binaries
+*.o
+*.a
+*.so
+wbox
