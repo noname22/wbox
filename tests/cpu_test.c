@@ -2,11 +2,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <dirent.h>
 
 #include "mooreader.h"
 #include "cpu.h"
 #include "mem.h"
 #include "codegen_public.h"
+
+#ifndef TEST_DATA_DIR
+#define TEST_DATA_DIR "ext/80386/v1_ex_real_mode"
+#endif
 
 extern uint8_t *ram;
 extern uint32_t cr2, cr3, cr4;
@@ -202,7 +207,7 @@ static void setup_cpu_state(const moo_cpu_state_t *state)
 /* Flags are lazily computed in 86Box. Call flags_rebuild() to materialize them. */
 extern void cpu_386_flags_rebuild(void);
 
-static int compare_cpu_state(const moo_test_t *test)
+static int compare_cpu_state(const moo_test_t *test, int verbose)
 {
     const moo_cpu_state_t *final = &test->final_state;
     int mismatches = 0;
@@ -222,11 +227,12 @@ static int compare_cpu_state(const moo_test_t *test)
                 }
 
                 if (expected != actual) {
-                    if (mismatches == 0) {
-                        printf("\n");
+                    if (verbose) {
+                        if (mismatches == 0)
+                            printf("\n");
+                        printf("    %s: expected 0x%08X, got 0x%08X\n",
+                               moo_reg32_name(i), expected, actual);
                     }
-                    printf("    %s: expected 0x%08X, got 0x%08X\n",
-                           moo_reg32_name(i), expected, actual);
                     mismatches++;
                 }
             }
@@ -239,11 +245,12 @@ static int compare_cpu_state(const moo_test_t *test)
         uint8_t actual = (ram && addr < 16 * 1024 * 1024) ? ram[addr] : 0;
 
         if (expected != actual) {
-            if (mismatches == 0) {
-                printf("\n");
+            if (verbose) {
+                if (mismatches == 0)
+                    printf("\n");
+                printf("    RAM[0x%08X]: expected 0x%02X, got 0x%02X\n",
+                       addr, expected, actual);
             }
-            printf("    RAM[0x%08X]: expected 0x%02X, got 0x%02X\n",
-                   addr, expected, actual);
             mismatches++;
         }
     }
@@ -303,7 +310,7 @@ static int run_single_test(const moo_test_t *test, int verbose)
         printf("  Final: EIP=%08X abrt=%d\n", cpu_state.pc, cpu_state.abrt);
     }
 
-    return compare_cpu_state(test);
+    return compare_cpu_state(test, verbose);
 }
 
 static void run_moo_tests(const char *filename, int max_tests)
@@ -316,19 +323,25 @@ static void run_moo_tests(const char *filename, int max_tests)
 
     moo_error_t err = moo_reader_load_file(reader, filename);
     if (err != MOO_OK) {
-        printf("Failed to load %s: %s\n", filename, moo_error_string(err));
+        printf("%s: LOAD ERROR (%s)\n", filename, moo_error_string(err));
         moo_reader_destroy(reader);
         return;
     }
 
-    const moo_header_t *header = moo_reader_get_header(reader);
-    printf("Loaded %s: %s CPU, %u tests\n",
-           filename, header->cpu_name, header->test_count);
+    /* Extract just the filename for display */
+    const char *basename = strrchr(filename, '/');
+    basename = basename ? basename + 1 : filename;
+
+    printf("%s: ", basename);
+    fflush(stdout);
 
     size_t count = moo_reader_get_test_count(reader);
     if (max_tests > 0 && (size_t)max_tests < count) {
         count = max_tests;
     }
+
+    int file_passed = 0;
+    int file_failed = 0;
 
     for (size_t i = 0; i < count; i++) {
         const moo_test_t *test = moo_reader_get_test(reader, i);
@@ -336,37 +349,88 @@ static void run_moo_tests(const char *filename, int max_tests)
             continue;
 
         tests_run++;
-        printf("Test %zu: %s... ", i, test->name ? test->name : "(unnamed)");
-        fflush(stdout);
-
-        /* Verbose mode for first few tests and test 4 */
-        int verbose = (i < 3) || (i == 4);
-        int mismatches = run_single_test(test, verbose);
+        int mismatches = run_single_test(test, 0);
 
         if (mismatches == 0) {
-            printf("PASSED\n");
             tests_passed++;
+            file_passed++;
         } else {
-            printf("FAILED (%d mismatches)\n", mismatches);
             tests_failed++;
+            file_failed++;
         }
     }
 
+    printf("  %d/%zu passed", file_passed, count);
+    if (file_failed > 0)
+        printf(", %d failed", file_failed);
+    printf("\n");
+
     moo_reader_destroy(reader);
+}
+
+static int compare_strings(const void *a, const void *b)
+{
+    return strcmp(*(const char **)a, *(const char **)b);
+}
+
+static void run_all_tests_in_dir(const char *dir_path)
+{
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        printf("Failed to open test directory: %s\n", dir_path);
+        return;
+    }
+
+    /* Collect all .MOO.gz files */
+    char **files = NULL;
+    size_t file_count = 0;
+    size_t file_capacity = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        size_t len = strlen(entry->d_name);
+        if (len > 7 && strcmp(entry->d_name + len - 7, ".MOO.gz") == 0) {
+            if (file_count >= file_capacity) {
+                file_capacity = file_capacity ? file_capacity * 2 : 64;
+                files = realloc(files, file_capacity * sizeof(char *));
+            }
+            /* Build full path */
+            char *path = malloc(strlen(dir_path) + 1 + len + 1);
+            sprintf(path, "%s/%s", dir_path, entry->d_name);
+            files[file_count++] = path;
+        }
+    }
+    closedir(dir);
+
+    /* Sort files alphabetically for consistent ordering */
+    qsort(files, file_count, sizeof(char *), compare_strings);
+
+    printf("Found %zu test files in %s\n\n", file_count, dir_path);
+
+    /* Run all test files */
+    for (size_t i = 0; i < file_count; i++) {
+        run_moo_tests(files[i], -1);  /* -1 = run all tests in file */
+        free(files[i]);
+    }
+    free(files);
 }
 
 int main(int argc, char *argv[])
 {
     const char *test_file = NULL;
-    int max_tests = 10;
+    int max_tests = -1;  /* Default: run all tests */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
             max_tests = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-a") == 0) {
-            max_tests = -1;
-        } else {
-            test_file = argv[i];
+        } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
+            test_file = argv[++i];
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("Usage: %s [-n count] [-f file.MOO.gz]\n", argv[0]);
+            printf("  -n count  Run only first 'count' tests per file\n");
+            printf("  -f file   Run tests from specific file only\n");
+            printf("\nBy default, runs all tests from %s\n", TEST_DATA_DIR);
+            return 0;
         }
     }
 
@@ -378,10 +442,7 @@ int main(int argc, char *argv[])
     if (test_file) {
         run_moo_tests(test_file, max_tests);
     } else {
-        printf("No test file specified.\n");
-        printf("Usage: %s [-n count | -a] <test.moo.gz>\n", argv[0]);
-        printf("  -n count  Run only first 'count' tests (default: 10)\n");
-        printf("  -a        Run all tests\n");
+        run_all_tests_in_dir(TEST_DATA_DIR);
     }
 
     cpu_test_cleanup();
