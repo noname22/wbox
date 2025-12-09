@@ -43,35 +43,11 @@ const machine_t machines[] = {
     {
         .name = "Generic Pentium II",
         .internal_name = "p2",
-        .type = 0,
-        .chipset = 0,
-        .init = NULL,
-        .p1_handler = NULL,
-        .gpio_handler = NULL,
-        .available_flag = 0,
-        .gpio_acpi_handler = NULL,
-        .cpu = { 0, NULL, 0, 0, 0, 0, 1.5f, 10.0f },
         .bus_flags = MACHINE_PCI,
-        .flags = 0,
-        .ram = { 8192, 524288, 8192 },
-        .ram_granularity = 8192,
-        .nvrmask = 127,
-        .jumpered_ecp_dma = 0,
-        .default_jumpered_ecp_dma = 0,
-        .kbc_device = NULL,
-        .kbc_params = 0,
-        .kbc_p1 = 0,
-        .gpio = 0,
-        .gpio_acpi = 0,
-        .device = NULL,
-        .kbd_device = NULL,
-        .fdc_device = NULL,
-        .sio_device = NULL,
+        .cpu = { 0, NULL, 0, 0, 0, 0, 1.5f, 10.0f },
     },
     { NULL }  /* Terminator */
 };
-
-void *machine_at_nupro592_init = NULL;
 
 int cpu_use_dynarec = 1;
 int pci_burst_time = 1;
@@ -175,9 +151,6 @@ uint64_t cpu_clock_multi = 1;
 
 /* Machine globals */
 int machine_at = 1;
-
-/* FDC globals */
-int fdc_type = 0;
 
 /* Memory read/write stubs */
 uint8_t readmembl(uint32_t addr) {
@@ -487,35 +460,14 @@ void nmi_write(uint16_t port, uint8_t val, void *priv) {
 void smram_backup_all(void) {}
 void smram_recalc_all(int ret) { (void)ret; }
 
-/* Device stubs */
-void *device_add(const void *d) { (void)d; return NULL; }
-void device_close_all(void) {}
-
 /* GDB stub */
 int gdbstub_instruction(void) { return 0; }
 void gdbstub_cpu_init(void) {}
-
-/* FDD stubs */
-void fdd_set_type(int drive, int type) { (void)drive; (void)type; }
-int fdd_get_type(int drive) { (void)drive; return 0; }
-
-/* Video stubs */
-void video_reset(int card) { (void)card; }
 
 /* DMA stubs */
 void dma_init(void) {}
 void dma_reset(void) {}
 void dma_set_at(int is286) { (void)is286; }
-
-/* PCI stubs */
-void pci_reset(void) {}
-
-/* PPI stubs */
-uint8_t ppi_get_portc(void) { return 0; }
-void ppi_reset(void) {}
-
-/* Keyboard stubs */
-void keyboard_send(uint8_t val) { (void)val; }
 
 /* Platform executable memory allocation for dynarec */
 void *plat_mmap(size_t size, uint8_t executable) {

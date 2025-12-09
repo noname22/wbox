@@ -30,7 +30,6 @@
 #include "timer.h"
 #include "machine.h"
 #include "mem.h"
-#include "nvr.h"
 #include "platform.h"
 #include "platform.h"
 

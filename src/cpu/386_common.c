@@ -21,9 +21,6 @@
 #include "smram.h"
 #include "pic.h"
 #include "pit.h"
-#include "fdd.h"
-#include "fdc.h"
-#include "keyboard.h"
 #include "timer.h"
 
 #include "x86seg.h"

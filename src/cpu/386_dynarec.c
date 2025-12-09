@@ -26,8 +26,6 @@
 #include "nmi.h"
 #include "pic.h"
 #include "timer.h"
-#include "fdd.h"
-#include "fdc.h"
 #include "machine.h"
 #include "platform.h"
 #include "platform.h"

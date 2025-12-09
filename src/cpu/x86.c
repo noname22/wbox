@@ -31,16 +31,10 @@
 #include "device.h"
 #include "dma.h"
 #include "io.h"
-#include "keyboard.h"
 #include "mem.h"
-#include "rom.h"
 #include "nmi.h"
 #include "pic.h"
-#include "pci.h"
-#include "ppi.h"
 #include "timer.h"
-#include "video.h"
-#include "video.h"
 
 /* The opcode of the instruction currently being executed. */
 uint8_t opcode;
@@ -254,16 +248,12 @@ reset_common(int hard)
     if (in_smm)
         leave_smm();
 
-    /* Needed for the ALi M1533. */
-    if (is486 && (hard || soft_reset_pci)) {
-        pci_reset();
-        if (!hard && soft_reset_pci) {
-            dma_reset();
-            /* TODO: Hack, but will do for time being, because all AT machines currently are 286+,
-                     and vice-versa. */
-            dma_set_at(is286);
-            device_reset_all(DEVICE_ALL);
-        }
+    if (is486 && !hard && soft_reset_pci) {
+        dma_reset();
+        /* TODO: Hack, but will do for time being, because all AT machines currently are 286+,
+                 and vice-versa. */
+        dma_set_at(is286);
+        device_reset_all(DEVICE_ALL);
     }
 
     use32          = 0;
@@ -348,7 +338,6 @@ reset_common(int hard)
     if (hard) {
         if (is486)
             smbase = is_am486dxl ? 0x00060000 : 0x00030000;
-        ppi_reset();
     }
     in_sys = 0;
 
