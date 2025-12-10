@@ -185,13 +185,34 @@ static uint32_t get_reg32(moo_reg32_t reg)
     }
 }
 
+/* Track RAM addresses modified by tests for quick cleanup */
+static uint32_t dirty_addrs[4096];
+static size_t dirty_count = 0;
+static int mem_initialized = 0;
+
 static void setup_cpu_state(const moo_cpu_state_t *state)
 {
-    mem_reset();
+    /* Initialize memory once per test file */
+    if (!mem_initialized) {
+        mem_reset();
+        mem_initialized = 1;
+    }
 
+    /* Clear only the RAM locations dirtied by previous test */
+    for (size_t i = 0; i < dirty_count; i++) {
+        if (ram && dirty_addrs[i] < 16 * 1024 * 1024) {
+            ram[dirty_addrs[i]] = 0;
+        }
+    }
+    dirty_count = 0;
+
+    /* Set initial RAM state and track addresses for cleanup */
     for (size_t i = 0; i < state->ram_count; i++) {
         if (ram && state->ram[i].address < 16 * 1024 * 1024) {
             ram[state->ram[i].address] = state->ram[i].value;
+            if (dirty_count < 4096) {
+                dirty_addrs[dirty_count++] = state->ram[i].address;
+            }
         }
     }
 
@@ -243,6 +264,11 @@ static int compare_cpu_state(const moo_test_t *test, int verbose)
         uint32_t addr = final->ram[i].address;
         uint8_t expected = final->ram[i].value;
         uint8_t actual = (ram && addr < 16 * 1024 * 1024) ? ram[addr] : 0;
+
+        /* Track this address for cleanup before next test */
+        if (dirty_count < 4096) {
+            dirty_addrs[dirty_count++] = addr;
+        }
 
         if (expected != actual) {
             if (verbose) {
@@ -366,6 +392,10 @@ static void run_moo_tests(const char *filename, int max_tests)
     printf("\n");
 
     moo_reader_destroy(reader);
+
+    /* Reset memory state for next file */
+    mem_initialized = 0;
+    dirty_count = 0;
 }
 
 static int compare_strings(const void *a, const void *b)

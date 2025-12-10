@@ -91,6 +91,9 @@ fpu_state_t fpu_state;
 /* Place this immediately after. */
 uint32_t abrt_error;
 
+/* Callback for illegal instruction events (NULL = silent) */
+cpu_illegal_instr_callback_t cpu_illegal_instr_callback = NULL;
+
 #ifdef USE_DYNAREC
 const OpFn *x86_dynarec_opcodes;
 const OpFn *x86_dynarec_opcodes_0f;

@@ -834,4 +834,8 @@ extern int      prefetch_queue_get_size(void);
 #define prefetch_queue_set_suspended(s) prefetch_queue_set_prefetching(!s)
 #define prefetch_queue_get_suspended !prefetch_queue_get_prefetching
 
+/* Callback for illegal instruction events (NULL = silent) */
+typedef void (*cpu_illegal_instr_callback_t)(uint16_t seg_cs, uint32_t eip, uint32_t fetchdat, uint8_t opcode);
+extern cpu_illegal_instr_callback_t cpu_illegal_instr_callback;
+
 #endif /*EMU_CPU_H*/

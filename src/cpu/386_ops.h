@@ -158,7 +158,8 @@ static int fopcode;
 static int
 ILLEGAL(uint32_t fetchdat)
 {
-    pclog("[%04X:%08X] Illegal instruction %08X (%02X)\n", CS, cpu_state.pc, fetchdat, fopcode);
+    if (cpu_illegal_instr_callback)
+        cpu_illegal_instr_callback(CS, cpu_state.pc, fetchdat, fopcode);
     cpu_state.pc = cpu_state.oldpc;
 
     x86illegal();
