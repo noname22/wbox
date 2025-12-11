@@ -739,6 +739,11 @@ extern int sysret(uint32_t fetchdat);
 typedef int (*sysenter_callback_t)(void);
 extern sysenter_callback_t sysenter_callback;
 
+/* WBOX software interrupt callback - called for INT instructions
+ * Returns 1 to indicate the interrupt was handled, 0 to process normally */
+typedef int (*softint_callback_t)(int num);
+extern softint_callback_t softint_callback;
+
 extern cpu_family_t *cpu_get_family(const char *internal_name);
 extern uint8_t       cpu_is_eligible(const cpu_family_t *cpu_family, int cpu, int machine);
 extern uint8_t       cpu_family_is_eligible(const cpu_family_t *cpu_family, int machine);

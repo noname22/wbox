@@ -90,6 +90,9 @@
 #define PEB_OEM_CODE_PAGE_DATA       0x5C  /* OemCodePageData */
 #define PEB_UNICODE_CASE_TABLE       0x60  /* UnicodeCaseTableData */
 
+/* GDI */
+#define PEB_GDI_SHARED_HANDLE_TABLE  0x94  /* GdiSharedHandleTable */
+
 #define PEB_SIZE                     0x1000 /* Minimum PEB size */
 
 /* OS version constants (Windows XP SP3) */

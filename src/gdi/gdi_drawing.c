@@ -666,6 +666,67 @@ uint32_t gdi_create_pen(gdi_handle_table_t *table, int style, int width, COLORRE
 }
 
 /*
+ * Bitmap creation
+ */
+
+uint32_t gdi_create_bitmap(gdi_handle_table_t *table, int width, int height,
+                           uint32_t planes, uint32_t bpp)
+{
+    gdi_bitmap_t *bmp = gdi_alloc_bitmap(table);
+    if (!bmp) return 0;
+
+    /* Normalize parameters */
+    if (width < 1) width = 1;
+    if (height < 1) height = 1;
+    if (planes < 1) planes = 1;
+    if (bpp < 1) bpp = 1;
+
+    bmp->width = width;
+    bmp->height = height;
+    bmp->bits_per_pixel = bpp;
+    bmp->planes = planes;
+    bmp->pitch = ((width * bpp + 31) / 32) * 4;  /* DWORD-aligned */
+
+    /* Allocate pixel data */
+    size_t size = bmp->pitch * height;
+    bmp->pixels = calloc(1, size);
+    if (!bmp->pixels) {
+        gdi_free_bitmap(table, bmp);
+        return 0;
+    }
+
+    uint32_t handle = gdi_alloc_handle(table, bmp, GDI_OBJ_BITMAP);
+    if (!handle) {
+        free(bmp->pixels);
+        gdi_free_bitmap(table, bmp);
+        return 0;
+    }
+
+    bmp->handle = handle;
+    return handle;
+}
+
+uint32_t gdi_create_pattern_brush(gdi_handle_table_t *table, uint32_t hbitmap)
+{
+    gdi_brush_t *brush = gdi_alloc_brush(table);
+    if (!brush) return 0;
+
+    brush->style = BS_PATTERN;
+    brush->color = 0;
+    brush->hatch_style = 0;
+    brush->pattern = (void *)(uintptr_t)hbitmap;  /* Store bitmap handle */
+
+    uint32_t handle = gdi_alloc_handle(table, brush, GDI_OBJ_BRUSH);
+    if (!handle) {
+        gdi_free_brush(table, brush);
+        return 0;
+    }
+
+    brush->handle = handle;
+    return handle;
+}
+
+/*
  * Region creation
  */
 

@@ -141,6 +141,10 @@ set(VM_SOURCES
     src/gdi/gdi_dc.c
     src/gdi/gdi_drawing.c
     src/gdi/gdi_text.c
+    src/user/user_shared.c
+    src/user/user_handle_table.c
+    src/user/user_class.c
+    src/user/user_syscalls.c
 )
 
 # WBOX VM library

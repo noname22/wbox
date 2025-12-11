@@ -623,12 +623,12 @@ int vm_init_dlls(vm_context_t *vm)
 
     printf("\n=== Initializing DLLs ===\n");
 
-    /* DLLs should be initialized in reverse load order (oldest first).
-     * The module list is newest-at-head (most recently loaded DLLs at front).
-     * A DLL's dependencies are loaded before it, so they appear later in the list.
-     * To initialize dependencies first, we iterate from tail to head. */
+    /* DLLs need to be initialized in correct dependency order.
+     * The module list order reflects encounter order during import resolution.
+     * We use reverse order (tail to head) because dependencies of a module
+     * are typically encountered and added to the list after the module itself. */
 
-    /* Count modules and build array for reverse iteration */
+    /* Count modules */
     int count = 0;
     loaded_module_t *mod = loader->modules.modules;
     while (mod) {
@@ -648,42 +648,62 @@ int vm_init_dlls(vm_context_t *vm)
         return -1;
     }
 
-    /* Fill array in list order (index 0 = head = newest) */
+    /* Fill array in list order (index 0 = head) */
     mod = loader->modules.modules;
     for (int i = 0; i < count; i++) {
         modules[i] = mod;
         mod = mod->next;
     }
 
-    /* Initialize from tail to head (oldest to newest, i.e., dependencies first) */
+    /* Track which modules have been initialized */
+    bool *inited = calloc(count, sizeof(bool));
+    if (!inited) {
+        free(modules);
+        return -1;
+    }
+
     int initialized = 0;
-    for (int i = count - 1; i >= 0; i--) {
-        mod = modules[i];
 
-        /* Skip main executable */
-        if (mod->is_main_exe) {
-            continue;
-        }
+    /* Helper function to init a DLL */
+    #define INIT_DLL(m, idx) do { \
+        if (!(m)->is_main_exe && !inited[idx] && \
+            (m)->entry_point != 0 && (m)->entry_point != (m)->base_va) { \
+            printf("  Initializing %s (entry=0x%08X)...", (m)->name, (m)->entry_point); \
+            fflush(stdout); \
+            int r = vm_call_dll_entry(vm, (m)->entry_point, (m)->base_va, 1); \
+            if (r) { printf(" OK\n"); initialized++; } \
+            else { printf(" FAILED\n"); } \
+            inited[idx] = true; \
+        } \
+    } while(0)
 
-        /* Skip DLLs with no entry point (ntdll.dll typically) */
-        if (mod->entry_point == 0 || mod->entry_point == mod->base_va) {
-            printf("  Skipping %s (no entry point)\n", mod->name);
-            continue;
-        }
+    /* Initialize core DLLs first in dependency order:
+     * 1. kernel32.dll (depends on ntdll)
+     * 2. gdi32.dll (depends on kernel32, ntdll)
+     * 3. user32.dll (depends on gdi32, kernel32, ntdll)
+     * These must be initialized before DLLs that use USER functions. */
+    const char *priority_dlls[] = {
+        "kernel32.dll", "msvcrt.dll", "advapi32.dll",
+        "gdi32.dll", "user32.dll", NULL
+    };
 
-        printf("  Initializing %s (entry=0x%08X)...", mod->name, mod->entry_point);
-        fflush(stdout);
-
-        int result = vm_call_dll_entry(vm, mod->entry_point, mod->base_va, 1);  /* DLL_PROCESS_ATTACH = 1 */
-
-        if (result) {
-            printf(" OK\n");
-            initialized++;
-        } else {
-            printf(" FAILED (returned FALSE)\n");
-            /* Some DLLs return FALSE but we continue anyway */
+    for (int p = 0; priority_dlls[p] != NULL; p++) {
+        for (int i = 0; i < count; i++) {
+            if (strcasecmp(modules[i]->name, priority_dlls[p]) == 0) {
+                INIT_DLL(modules[i], i);
+                break;
+            }
         }
     }
+
+    /* Initialize remaining DLLs */
+    for (int i = count - 1; i >= 0; i--) {
+        mod = modules[i];
+        INIT_DLL(mod, i);
+    }
+
+    #undef INIT_DLL
+    free(inited);
 
     free(modules);
 
@@ -871,6 +891,13 @@ int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
     printf("KUSER_SHARED_DATA at 0x%08X (phys 0x%08X)\n", VM_KUSD_ADDR, kusd_phys);
     printf("  SystemCall stub at 0x%08X\n", syscall_stub_va);
     printf("  DLL init stub at 0x%08X\n", dll_init_stub_va);
+
+    /* Verify the memory was written correctly */
+    uint32_t verify_syscall_ptr = mem_readl_phys(kusd_phys + 0x300);
+    uint8_t verify_sysenter0 = mem_readb_phys(kusd_phys + 0x340);
+    uint8_t verify_sysenter1 = mem_readb_phys(kusd_phys + 0x341);
+    printf("  [DEBUG] @0x7FFE0300 = 0x%08X (expect 0x%08X)\n", verify_syscall_ptr, syscall_stub_va);
+    printf("  [DEBUG] @0x7FFE0340 = %02X %02X (expect 0F 34 for SYSENTER)\n", verify_sysenter0, verify_sysenter1);
 
     return 0;
 }

@@ -496,7 +496,7 @@
 #define NtUserPostMessage                    (WIN32K_SYSCALL_BASE + 480)
 #define NtUserPostThreadMessage              (WIN32K_SYSCALL_BASE + 481)
 #define NtUserPrintWindow                    (WIN32K_SYSCALL_BASE + 482)
-#define NtUserProcessConnect                 (WIN32K_SYSCALL_BASE + 483)
+#define NtUserProcessConnect                 (WIN32K_SYSCALL_BASE + 477)
 #define NtUserQueryInformationThread         (WIN32K_SYSCALL_BASE + 484)
 #define NtUserQueryInputContext              (WIN32K_SYSCALL_BASE + 485)
 #define NtUserQuerySendMessage               (WIN32K_SYSCALL_BASE + 486)

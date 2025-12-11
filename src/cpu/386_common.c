@@ -51,6 +51,9 @@ int      stack32;
 /* WBOX syscall callback - called before normal SYSENTER processing */
 sysenter_callback_t sysenter_callback = NULL;
 
+/* WBOX software interrupt callback - called for INT instructions */
+softint_callback_t softint_callback = NULL;
+
 int      cpu_init = 0;
 
 uint32_t *eal_r;
@@ -1545,6 +1548,12 @@ x86_int_sw(int num)
 {
     uint32_t addr;
 
+    /* WBOX: Check for software interrupt callback (used for INT 0x03, INT 0x2D, etc.) */
+    if (softint_callback && softint_callback(num)) {
+        CPU_BLOCK_END();
+        return;
+    }
+
     flags_rebuild();
     cycles -= timing_int;
 
@@ -1787,9 +1796,32 @@ cpu_386_check_instruction_fault(void)
     return fault;
 }
 
+/* Global counter to detect how often we execute at 0x7FFE0340 area */
+static int sysenter_stub_counter = 0;
+
+/* Debug: track if we're near NtUserProcessConnect */
+static int near_user_syscall = 0;
+void wbox_trace_pc(uint32_t pc) {
+    /* Check if we're in the NtUserProcessConnect stub (0x77A90E63-0x77A90E70) */
+    if (pc >= 0x77A90E60 && pc <= 0x77A90E75) {
+        printf("TRACE: PC=0x%08X EAX=0x%08X EDX=0x%08X\n", pc, EAX, EDX);
+        near_user_syscall = 1;
+    }
+    /* Also trace if we're at 0x7FFE0340 (syscall stub) */
+    if (pc >= 0x7FFE0340 && pc <= 0x7FFE0360) {
+        printf("TRACE: At syscall stub PC=0x%08X EAX=0x%08X\n", pc, EAX);
+    }
+}
+
 int
 sysenter(UNUSED(uint32_t fetchdat))
 {
+    sysenter_stub_counter++;
+    /* Only show important syscalls to reduce noise */
+    if (EAX >= 0x1000 && EAX < 0x1400) {
+        printf("SYSENTER[%d]: EAX=0x%08X PC=0x%08X oldpc=0x%08X\n",
+               sysenter_stub_counter, EAX, cpu_state.pc, cpu_state.oldpc);
+    }
     /* WBOX: Call syscall callback if registered */
     if (sysenter_callback) {
         return sysenter_callback();

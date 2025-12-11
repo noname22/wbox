@@ -16,6 +16,7 @@
 static int
 opSYSENTER(uint32_t fetchdat)
 {
+    fprintf(stderr, "[opSYSENTER] EAX=0x%08X EDX=0x%08X PC=0x%08X\n", EAX, EDX, cpu_state.pc);
     int ret = sysenter(fetchdat);
 
     if (ret <= 1)

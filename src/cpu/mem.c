@@ -625,6 +625,15 @@ getpccache(uint32_t a)
         getpccache_trace_count++;
     }
 
+    /* Trace execution around user32.dll crash area */
+    if (virt >= 0x77A4ED60 && virt <= 0x77A4EDA0) {
+        fprintf(stderr, "[USER32_PC] VA=0x%08X EAX=0x%08X EDX=0x%08X\n", virt, EAX, EDX);
+    }
+    /* Trace syscall stub access */
+    if (virt >= 0x7FFE0340 && virt <= 0x7FFE0360) {
+        fprintf(stderr, "[SYSCALL_STUB_PC] VA=0x%08X EAX=0x%08X\n", virt, EAX);
+    }
+
     /* Handle paging if enabled */
     if (cr0 >> 31) {
         phys = mmutranslate_read(virt);

@@ -309,13 +309,15 @@ exec386_2386(int32_t cycs)
                 if (in_smm)
                     x386_log("[%04X:%08X] %08X\n", CS, cpu_state.pc, fetchdat);
 #endif
-                /* WBOX: Trace execution in kernel32.dll range or suspicious addresses */
-                static int exec_trace_count = 0;
-                if (exec_trace_count < 50 &&
-                    (cpu_state.pc >= 0x7C500000 && cpu_state.pc < 0x7C600000)) {
-                    fprintf(stderr, "[EXEC] %04X:%08X fetchdat=%08X op=%02X\n",
-                            CS, cpu_state.pc, fetchdat, fetchdat & 0xFF);
-                    exec_trace_count++;
+                /* WBOX: Trace execution around user32.dll crash (0x77A4ED70-0x77A4ED90) */
+                if (cpu_state.pc >= 0x77A4ED60 && cpu_state.pc <= 0x77A4EDA0) {
+                    fprintf(stderr, "[USER32] %04X:%08X fetchdat=%08X op=%02X EAX=%08X EDX=%08X\n",
+                            CS, cpu_state.pc, fetchdat, fetchdat & 0xFF, EAX, EDX);
+                }
+                /* Trace syscall stub area */
+                if (cpu_state.pc >= 0x7FFE0300 && cpu_state.pc <= 0x7FFE0360) {
+                    fprintf(stderr, "[SYSCALL_STUB] %04X:%08X fetchdat=%08X op=%02X EAX=%08X\n",
+                            CS, cpu_state.pc, fetchdat, fetchdat & 0xFF, EAX);
                 }
                 /* Also trace any jump to low memory */
                 if (cpu_state.pc < 0x00100000 && cpu_state.pc != 0) {

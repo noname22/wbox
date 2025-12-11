@@ -37,6 +37,21 @@ static void syscall_return(ntstatus_t status)
 }
 
 /*
+ * Return from win32k syscall - preserves EAX set by handler.
+ * Win32k syscalls (GDI/USER) return handles/values in EAX which the
+ * handler sets directly, so we must NOT overwrite it here.
+ */
+static void win32k_syscall_return(void)
+{
+    /* EAX already set by the win32k handler */
+
+    /* Read return address from user stack */
+    uint32_t return_addr = readmemll(ESP);
+    ESP += 4;  /* Pop the return address */
+    cpu_state.pc = return_addr;
+}
+
+/*
  * Return from stdcall function (cleans up parameters)
  * Used for hooked functions like RtlAllocateHeap
  */
@@ -62,6 +77,14 @@ int nt_syscall_handler(void)
 {
     uint32_t syscall_num = EAX;
     ntstatus_t result;
+
+    /* Debug: show all syscalls */
+    static int syscall_count = 0;
+    syscall_count++;
+    if (syscall_num >= 0x1000 && syscall_num < 0x1400) {
+        fprintf(stderr, "DEBUG[%d]: win32k syscall 0x%04X at PC=0x%08X\n",
+               syscall_count, syscall_num, cpu_state.pc);
+    }
 
     /* Dispatch to specific syscall handler */
     switch (syscall_num) {
@@ -138,6 +161,10 @@ int nt_syscall_handler(void)
             uint32_t res = 0;
             if (vm && vm->heap) {
                 res = heap_alloc(vm->heap, vm, heap_handle, flags, size);
+            }
+            if (res == 0 && size > 0) {
+                fprintf(stderr, "HEAP: Alloc FAILED heap=0x%X flags=0x%X size=%u\n",
+                        heap_handle, flags, size);
             }
             stdcall_return(res, 3);
             return 1;
@@ -316,12 +343,104 @@ int nt_syscall_handler(void)
             return 1;
         }
 
+        case NtCreateSection: {
+            /* NtCreateSection(SectionHandle, DesiredAccess, ObjectAttributes, MaxSize, PageProtection, AllocationAttributes, FileHandle)
+             * syscall, 7 params on stack
+             *
+             * This is used for file mapping and NLS data. We don't fully support sections,
+             * so return STATUS_ACCESS_DENIED to let the caller handle it gracefully.
+             * Many paths have fallback code when section creation fails. */
+            syscall_return(STATUS_ACCESS_DENIED);
+            return 1;
+        }
+
+        case NtQueryInformationProcess: {
+            /* NtQueryInformationProcess(ProcessHandle, InfoClass, ProcessInfo, InfoLength, ReturnLength)
+             * syscall, 5 params on stack */
+            uint32_t process_handle = readmemll(ESP + 4);
+            uint32_t info_class = readmemll(ESP + 8);
+            uint32_t process_info = readmemll(ESP + 12);
+            uint32_t info_length = readmemll(ESP + 16);
+            uint32_t return_length_ptr = readmemll(ESP + 20);
+
+            (void)process_handle;
+
+            vm_context_t *vm = vm_get_context();
+
+            /* Handle common information classes */
+            switch (info_class) {
+                case 0:  /* ProcessBasicInformation */
+                    if (vm && process_info && info_length >= 24) {
+                        /* PROCESS_BASIC_INFORMATION:
+                         *   ExitStatus (4), PebBaseAddress (4), AffinityMask (4),
+                         *   BasePriority (4), UniqueProcessId (4), InheritedFromUniqueProcessId (4) */
+                        uint32_t phys = paging_get_phys(&vm->paging, process_info);
+                        if (phys) {
+                            mem_writel_phys(phys + 0, 0);           /* ExitStatus = still running */
+                            mem_writel_phys(phys + 4, vm->peb_addr); /* PebBaseAddress */
+                            mem_writel_phys(phys + 8, 1);           /* AffinityMask */
+                            mem_writel_phys(phys + 12, 8);          /* BasePriority */
+                            mem_writel_phys(phys + 16, 4096);       /* UniqueProcessId */
+                            mem_writel_phys(phys + 20, 0);          /* InheritedFromUniqueProcessId */
+                        }
+                        if (return_length_ptr) {
+                            uint32_t rlen_phys = paging_get_phys(&vm->paging, return_length_ptr);
+                            if (rlen_phys) {
+                                mem_writel_phys(rlen_phys, 24);
+                            }
+                        }
+                    }
+                    break;
+
+                case 7:  /* ProcessDebugPort */
+                    if (vm && process_info && info_length >= 4) {
+                        uint32_t phys = paging_get_phys(&vm->paging, process_info);
+                        if (phys) {
+                            mem_writel_phys(phys, 0);  /* No debugger attached */
+                        }
+                        if (return_length_ptr) {
+                            uint32_t rlen_phys = paging_get_phys(&vm->paging, return_length_ptr);
+                            if (rlen_phys) {
+                                mem_writel_phys(rlen_phys, 4);
+                            }
+                        }
+                    }
+                    break;
+
+                case 31: /* ProcessDebugFlags */
+                    if (vm && process_info && info_length >= 4) {
+                        uint32_t phys = paging_get_phys(&vm->paging, process_info);
+                        if (phys) {
+                            mem_writel_phys(phys, 1);  /* PROCESS_DEBUG_INHERIT = not debugged */
+                        }
+                        if (return_length_ptr) {
+                            uint32_t rlen_phys = paging_get_phys(&vm->paging, return_length_ptr);
+                            if (rlen_phys) {
+                                mem_writel_phys(rlen_phys, 4);
+                            }
+                        }
+                    }
+                    break;
+
+                default:
+                    /* Unknown info class - return success with zeroed data */
+                    break;
+            }
+
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
         default:
             /* Check if this is a win32k syscall */
             if (syscall_num >= WIN32K_SYSCALL_BASE) {
-                /* Win32k syscall - dispatch to GDI/USER handler */
-                result = win32k_syscall_dispatch(syscall_num);
-                syscall_return(result);
+                /* Win32k syscall - dispatch to GDI/USER handler.
+                 * These handlers set EAX themselves with handles/values,
+                 * so we use win32k_syscall_return() which preserves EAX. */
+                fprintf(stderr, "SYSCALL: win32k 0x%X (%s)\n", syscall_num, syscall_get_name(syscall_num));
+                win32k_syscall_dispatch(syscall_num);
+                fprintf(stderr, "SYSCALL: win32k 0x%X returned 0x%X\n", syscall_num, EAX);
+                win32k_syscall_return();
                 return 1;
             }
 
@@ -346,6 +465,32 @@ int nt_syscall_handler(void)
 }
 
 /*
+ * Software interrupt handler
+ * Handles INT 0x03 (breakpoint) and INT 0x2D (debug service)
+ * Returns 1 if handled, 0 to process normally
+ */
+static int nt_softint_handler(int num)
+{
+    switch (num) {
+        case 0x03:
+            /* INT 3 (breakpoint) - just continue execution
+             * This is used by debug code and should be a no-op when no debugger is attached */
+            return 1;
+
+        case 0x2D:
+            /* INT 0x2D (debug service) - Windows kernel debugger interface
+             * When no debugger is attached, return STATUS_BREAKPOINT (0x80000003) in EAX
+             * The caller expects this status when not being debugged */
+            EAX = 0x80000003;  /* STATUS_BREAKPOINT */
+            return 1;
+
+        default:
+            /* Let other interrupts be processed normally */
+            return 0;
+    }
+}
+
+/*
  * Install the syscall handler
  * This sets up the SYSENTER callback in the CPU emulator
  */
@@ -353,6 +498,7 @@ void nt_install_syscall_handler(void)
 {
     printf("Installing NT syscall handler\n");
     sysenter_callback = nt_syscall_handler;
+    softint_callback = nt_softint_handler;
 }
 
 /*
@@ -361,4 +507,5 @@ void nt_install_syscall_handler(void)
 void nt_remove_syscall_handler(void)
 {
     sysenter_callback = NULL;
+    softint_callback = NULL;
 }

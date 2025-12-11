@@ -10,6 +10,7 @@
 #include "../gdi/gdi_dc.h"
 #include "../gdi/gdi_drawing.h"
 #include "../gdi/gdi_text.h"
+#include "../user/user_syscalls.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,10 +21,18 @@ static gdi_handle_table_t g_gdi_handles;
 static display_context_t *g_display = NULL;
 static bool g_initialized = false;
 
-/* Helper to read guest memory */
+/*
+ * Read a stack argument (win32k syscall convention)
+ * Stack layout at SYSENTER:
+ *   ESP+0:  return address from "call [0x7FFE0300]" (back to syscall stub)
+ *   ESP+4:  return address from "call NtGdiXxx" or "call NtUserXxx" (back to caller)
+ *   ESP+8:  arg 0
+ *   ESP+12: arg 1
+ *   etc.
+ */
 static inline uint32_t read_stack_arg(int index)
 {
-    return readmemll(ESP + 4 + (index * 4));
+    return readmemll(ESP + 8 + (index * 4));
 }
 
 /* Helper to read guest string (Unicode) */
@@ -483,6 +492,41 @@ ntstatus_t sys_NtGdiCreateSolidBrush(void)
     /* arg 1 is reserved */
 
     uint32_t handle = gdi_create_solid_brush(&g_gdi_handles, color);
+
+    EAX = handle;
+    return STATUS_SUCCESS;
+}
+
+/* NtGdiCreateBitmap */
+ntstatus_t sys_NtGdiCreateBitmap(void)
+{
+    int width = (int)read_stack_arg(0);
+    int height = (int)read_stack_arg(1);
+    uint32_t planes = read_stack_arg(2);
+    uint32_t bpp = read_stack_arg(3);
+    uint32_t bits_ptr = read_stack_arg(4);
+
+    (void)bits_ptr;  /* We don't support initializing from bits for now */
+
+    /* Create a bitmap object */
+    uint32_t handle = gdi_create_bitmap(&g_gdi_handles, width, height, planes, bpp);
+
+    EAX = handle;
+    return STATUS_SUCCESS;
+}
+
+/* NtGdiCreatePatternBrushInternal */
+ntstatus_t sys_NtGdiCreatePatternBrushInternal(void)
+{
+    uint32_t hbitmap = read_stack_arg(0);
+    uint32_t bUse8x8 = read_stack_arg(1);
+    uint32_t bPen = read_stack_arg(2);
+
+    (void)bUse8x8;
+    (void)bPen;
+
+    /* Create a pattern brush from the bitmap */
+    uint32_t handle = gdi_create_pattern_brush(&g_gdi_handles, hbitmap);
 
     EAX = handle;
     return STATUS_SUCCESS;
@@ -1130,8 +1174,12 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
         /* GDI Syscalls */
         case NtGdiBitBlt - WIN32K_SYSCALL_BASE:
             return sys_NtGdiBitBlt();
+        case NtGdiCreateBitmap - WIN32K_SYSCALL_BASE:
+            return sys_NtGdiCreateBitmap();
         case NtGdiCreateCompatibleDC - WIN32K_SYSCALL_BASE:
             return sys_NtGdiCreateCompatibleDC();
+        case NtGdiCreatePatternBrushInternal - WIN32K_SYSCALL_BASE:
+            return sys_NtGdiCreatePatternBrushInternal();
         case NtGdiCreatePen - WIN32K_SYSCALL_BASE:
             return sys_NtGdiCreatePen();
         case NtGdiCreateRectRgn - WIN32K_SYSCALL_BASE:
@@ -1220,6 +1268,16 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
             return sys_NtUserReleaseDC();
         case NtUserSelectPalette - WIN32K_SYSCALL_BASE:
             return sys_NtUserSelectPalette();
+
+        /* Bootstrap USER Syscalls (needed for DLL init) */
+        case NtUserProcessConnect - WIN32K_SYSCALL_BASE:
+            return sys_NtUserProcessConnect();
+        case NtUserInitializeClientPfnArrays - WIN32K_SYSCALL_BASE:
+            return sys_NtUserInitializeClientPfnArrays();
+        case NtUserGetClassInfo - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetClassInfo();
+        case NtUserRegisterClassExWOW - WIN32K_SYSCALL_BASE:
+            return sys_NtUserRegisterClassExWOW();
 
         default:
             /* Unknown syscall - log and return success with 0 */

@@ -116,6 +116,13 @@ uint32_t gdi_create_solid_brush(gdi_handle_table_t *table, COLORREF color);
 /* Create pen */
 uint32_t gdi_create_pen(gdi_handle_table_t *table, int style, int width, COLORREF color);
 
+/* Create bitmap */
+uint32_t gdi_create_bitmap(gdi_handle_table_t *table, int width, int height,
+                           uint32_t planes, uint32_t bpp);
+
+/* Create pattern brush from bitmap */
+uint32_t gdi_create_pattern_brush(gdi_handle_table_t *table, uint32_t hbitmap);
+
 /*
  * Region creation
  */
