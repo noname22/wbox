@@ -6,9 +6,9 @@
 #include <unistd.h>
 
 /* Static entries for standard handles (used for pseudo-handle resolution) */
-static handle_entry_t std_in_entry  = { HANDLE_TYPE_CONSOLE_IN,  STDIN_FILENO };
-static handle_entry_t std_out_entry = { HANDLE_TYPE_CONSOLE_OUT, STDOUT_FILENO };
-static handle_entry_t std_err_entry = { HANDLE_TYPE_CONSOLE_ERR, STDERR_FILENO };
+static handle_entry_t std_in_entry  = { HANDLE_TYPE_CONSOLE_IN,  STDIN_FILENO, 0, 0 };
+static handle_entry_t std_out_entry = { HANDLE_TYPE_CONSOLE_OUT, STDOUT_FILENO, 0, 0 };
+static handle_entry_t std_err_entry = { HANDLE_TYPE_CONSOLE_ERR, STDERR_FILENO, 0, 0 };
 
 void handles_init(handle_table_t *ht)
 {
@@ -41,6 +41,8 @@ uint32_t handles_add(handle_table_t *ht, handle_type_t type, int host_fd)
         if (ht->entries[i].type == HANDLE_TYPE_NONE) {
             ht->entries[i].type = type;
             ht->entries[i].host_fd = host_fd;
+            ht->entries[i].access_mask = 0;
+            ht->entries[i].file_offset = 0;
             ht->next_handle = i + 1;
             return i;
         }
@@ -51,6 +53,8 @@ uint32_t handles_add(handle_table_t *ht, handle_type_t type, int host_fd)
         if (ht->entries[i].type == HANDLE_TYPE_NONE) {
             ht->entries[i].type = type;
             ht->entries[i].host_fd = host_fd;
+            ht->entries[i].access_mask = 0;
+            ht->entries[i].file_offset = 0;
             ht->next_handle = i + 1;
             return i;
         }
@@ -78,6 +82,8 @@ void handles_remove(handle_table_t *ht, uint32_t handle)
     if (handle > 0 && handle < MAX_HANDLES) {
         ht->entries[handle].type = HANDLE_TYPE_NONE;
         ht->entries[handle].host_fd = -1;
+        ht->entries[handle].access_mask = 0;
+        ht->entries[handle].file_offset = 0;
     }
 }
 

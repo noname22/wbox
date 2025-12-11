@@ -36,6 +36,26 @@ int nt_syscall_handler(void)
 
     /* Dispatch to specific syscall handler */
     switch (syscall_num) {
+        case NtClose:
+            result = sys_NtClose();
+            syscall_return(result);
+            return 1;
+
+        case NtCreateFile:
+            result = sys_NtCreateFile();
+            syscall_return(result);
+            return 1;
+
+        case NtOpenFile:
+            result = sys_NtOpenFile();
+            syscall_return(result);
+            return 1;
+
+        case NtReadFile:
+            result = sys_NtReadFile();
+            syscall_return(result);
+            return 1;
+
         case NtWriteFile:
             result = sys_NtWriteFile();
             syscall_return(result);

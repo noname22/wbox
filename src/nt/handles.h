@@ -19,7 +19,9 @@ typedef enum {
 /* Handle entry */
 typedef struct {
     handle_type_t type;
-    int host_fd;  /* Host file descriptor (-1 if not applicable) */
+    int host_fd;           /* Host file descriptor (-1 if not applicable) */
+    uint32_t access_mask;  /* Requested access flags (GENERIC_READ, etc.) */
+    uint64_t file_offset;  /* Current file position for seekable files */
 } handle_entry_t;
 
 /* Maximum number of handles per process */

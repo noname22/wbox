@@ -10,6 +10,7 @@
 #include "paging.h"
 #include "../pe/pe_loader.h"
 #include "../nt/handles.h"
+#include "../nt/vfs_jail.h"
 
 /* Memory layout constants */
 #define VM_PHYS_MEM_SIZE       (256 * 1024 * 1024)  /* 256MB physical memory */
@@ -66,6 +67,9 @@ typedef struct {
 
     /* Handle table for files, etc. */
     handle_table_t handles;
+
+    /* Virtual filesystem jail */
+    vfs_jail_t vfs_jail;
 } vm_context_t;
 
 /*

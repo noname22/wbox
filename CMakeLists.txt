@@ -125,6 +125,7 @@ set(VM_SOURCES
     src/nt/ntdll.c
     src/nt/syscall_table.c
     src/nt/handles.c
+    src/nt/vfs_jail.c
     src/nt/sys_file.c
     src/nt/sys_process.c
     src/process/process.c

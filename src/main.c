@@ -16,29 +16,47 @@
 #include "vm/paging.h"
 #include "process/process.h"
 #include "nt/syscalls.h"
+#include "nt/vfs_jail.h"
 
 static void print_usage(const char *progname)
 {
     fprintf(stderr, "WBOX - Windows Box\n");
     fprintf(stderr, "A DOSBox-like emulator for 32-bit Windows applications\n\n");
-    fprintf(stderr, "Usage: %s <executable.exe>\n", progname);
+    fprintf(stderr, "Usage: %s [options] <executable.exe>\n\n", progname);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --jail <path>   Confine file access to specified directory\n");
     fprintf(stderr, "\nCurrently supports:\n");
     fprintf(stderr, "  - Static 32-bit PE executables\n");
     fprintf(stderr, "  - Console applications (CUI)\n");
-    fprintf(stderr, "\nThe emulator will load the PE, run until the first syscall,\n");
-    fprintf(stderr, "print the syscall information, and exit.\n");
 }
 
 int main(int argc, char *argv[])
 {
     int ret = 0;
+    const char *exe_path = NULL;
+    const char *jail_path = NULL;
 
-    if (argc < 2) {
+    /* Parse command line options */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--jail") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: --jail requires a path argument\n");
+                return 1;
+            }
+            jail_path = argv[++i];
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
+        } else {
+            exe_path = argv[i];
+        }
+    }
+
+    if (!exe_path) {
         print_usage(argv[0]);
         return 1;
     }
-
-    const char *exe_path = argv[1];
 
     printf("=== WBOX - Windows Box ===\n");
     printf("Loading: %s\n\n", exe_path);
@@ -68,6 +86,16 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to initialize VM\n");
         ret = 1;
         goto cleanup;
+    }
+
+    /* Initialize VFS jail if specified */
+    if (jail_path) {
+        printf("Initializing VFS jail: %s\n", jail_path);
+        if (vfs_jail_init(&vm.vfs_jail, jail_path) != 0) {
+            fprintf(stderr, "Failed to initialize VFS jail at '%s'\n", jail_path);
+            ret = 1;
+            goto cleanup;
+        }
     }
 
     /* Load PE executable */
