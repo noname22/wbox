@@ -1,0 +1,1 @@
+- As a general rule, when I ask to change something, I do not expect there to be some kind of backwards compatibility with old behavior. Throw out the old behavior and replace it with what I asked for. There is a brand new project, there is no legacy to worry about.
