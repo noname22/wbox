@@ -7,8 +7,10 @@
 #include "../cpu/mem.h"
 #include "../cpu/platform.h"
 #include "../cpu/x86.h"
+#include "../loader/loader.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Global VM context pointer for syscall handler access */
@@ -500,4 +502,113 @@ void vm_dump_state(vm_context_t *vm)
            cpu_state.seg_ss.seg, cpu_state.seg_fs.seg, cpu_state.seg_gs.seg);
     printf("\nPaging:\n");
     paging_dump(&vm->paging);
+}
+
+uint32_t vm_va_to_phys(vm_context_t *vm, uint32_t va)
+{
+    return paging_get_phys(&vm->paging, va);
+}
+
+int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
+                         const char *ntdll_path)
+{
+    /* Allocate loader context */
+    loader_context_t *loader = malloc(sizeof(loader_context_t));
+    if (!loader) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Out of memory\n");
+        return -1;
+    }
+
+    /* Initialize loader */
+    if (loader_init(loader, vm) < 0) {
+        free(loader);
+        return -1;
+    }
+
+    /* Set ntdll path if provided */
+    if (ntdll_path) {
+        loader_set_ntdll_path(loader, ntdll_path);
+    }
+
+    /* Store loader in VM context */
+    vm->loader = loader;
+
+    /* Load executable with DLLs */
+    if (loader_load_executable(loader, vm, exe_path) < 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to load executable\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+
+    /* Update VM state from loader */
+    vm->image_base = loader_get_image_base(loader);
+    vm->entry_point = loader_get_entry_point(loader);
+    if (loader->main_module) {
+        vm->size_of_image = loader->main_module->size;
+    }
+
+    /* Allocate and map user stack */
+    uint32_t stack_base_page = vm->stack_base & PAGE_MASK;
+    uint32_t stack_top_page = vm->stack_top & PAGE_MASK;
+    uint32_t stack_map_size = (stack_top_page - stack_base_page) + PAGE_SIZE;
+    uint32_t stack_phys = paging_alloc_phys(&vm->paging, stack_map_size);
+    if (stack_phys == 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to allocate stack\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    if (paging_map_range(&vm->paging, stack_base_page, stack_phys,
+                         stack_map_size, PTE_USER | PTE_WRITABLE) != 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to map stack\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    printf("User stack: 0x%08X-0x%08X (phys 0x%08X, mapped 0x%X bytes)\n",
+           vm->stack_base, vm->stack_top, stack_phys, stack_map_size);
+
+    /* Allocate and map TEB */
+    uint32_t teb_phys = paging_alloc_phys(&vm->paging, PAGE_SIZE);
+    if (teb_phys == 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to allocate TEB\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    if (paging_map_page(&vm->paging, vm->teb_addr, teb_phys,
+                        PTE_USER | PTE_WRITABLE) != 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to map TEB\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    printf("TEB at 0x%08X (phys 0x%08X)\n", vm->teb_addr, teb_phys);
+
+    /* Allocate and map PEB */
+    uint32_t peb_phys = paging_alloc_phys(&vm->paging, PAGE_SIZE);
+    if (peb_phys == 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to allocate PEB\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    if (paging_map_page(&vm->paging, vm->peb_addr, peb_phys,
+                        PTE_USER | PTE_WRITABLE) != 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to map PEB\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    printf("PEB at 0x%08X (phys 0x%08X)\n", vm->peb_addr, peb_phys);
+
+    return 0;
 }

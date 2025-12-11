@@ -129,6 +129,11 @@ set(VM_SOURCES
     src/nt/sys_file.c
     src/nt/sys_process.c
     src/process/process.c
+    src/loader/module.c
+    src/loader/exports.c
+    src/loader/imports.c
+    src/loader/stubs.c
+    src/loader/loader.c
 )
 
 # WBOX VM library

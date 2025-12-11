@@ -12,6 +12,9 @@
 #include "../nt/handles.h"
 #include "../nt/vfs_jail.h"
 
+/* Forward declaration for loader */
+struct loader_context;
+
 /* Memory layout constants */
 #define VM_PHYS_MEM_SIZE       (256 * 1024 * 1024)  /* 256MB physical memory */
 #define VM_KERNEL_BASE         0x80000000           /* Kernel space starts at 2GB */
@@ -70,6 +73,9 @@ typedef struct {
 
     /* Virtual filesystem jail */
     vfs_jail_t vfs_jail;
+
+    /* Loader context (optional, for DLL loading) */
+    struct loader_context *loader;
 } vm_context_t;
 
 /*
@@ -133,5 +139,20 @@ vm_context_t *vm_get_context(void);
  * Debug: dump VM state
  */
 void vm_dump_state(vm_context_t *vm);
+
+/*
+ * Load PE with DLL support using the loader subsystem
+ * This allocates and initializes the loader context internally
+ * ntdll_path may be NULL if no ntdll.dll imports are expected
+ * Returns 0 on success, -1 on failure
+ */
+int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
+                         const char *ntdll_path);
+
+/*
+ * Translate virtual address to physical address
+ * Returns 0 if translation fails
+ */
+uint32_t vm_va_to_phys(vm_context_t *vm, uint32_t va);
 
 #endif /* WBOX_VM_H */

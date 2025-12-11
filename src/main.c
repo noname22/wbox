@@ -25,9 +25,11 @@ static void print_usage(const char *progname)
     fprintf(stderr, "Usage: %s [options] <executable.exe>\n\n", progname);
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  --jail <path>   Confine file access to specified directory\n");
+    fprintf(stderr, "  --ntdll <path>  Path to ntdll.dll (for DLL import support)\n");
     fprintf(stderr, "\nCurrently supports:\n");
     fprintf(stderr, "  - Static 32-bit PE executables\n");
     fprintf(stderr, "  - Console applications (CUI)\n");
+    fprintf(stderr, "  - DLL imports from ntdll.dll (with --ntdll option)\n");
 }
 
 int main(int argc, char *argv[])
@@ -35,6 +37,7 @@ int main(int argc, char *argv[])
     int ret = 0;
     const char *exe_path = NULL;
     const char *jail_path = NULL;
+    const char *ntdll_path = NULL;
 
     /* Parse command line options */
     for (int i = 1; i < argc; i++) {
@@ -44,6 +47,12 @@ int main(int argc, char *argv[])
                 return 1;
             }
             jail_path = argv[++i];
+        } else if (strcmp(argv[i], "--ntdll") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: --ntdll requires a path argument\n");
+                return 1;
+            }
+            ntdll_path = argv[++i];
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -100,10 +109,21 @@ int main(int argc, char *argv[])
 
     /* Load PE executable */
     printf("\nLoading PE executable...\n");
-    if (vm_load_pe(&vm, exe_path) != 0) {
-        fprintf(stderr, "Failed to load PE: %s\n", exe_path);
-        ret = 1;
-        goto cleanup;
+    if (ntdll_path) {
+        /* Use new loader with DLL support */
+        printf("Using DLL loader (ntdll: %s)\n", ntdll_path);
+        if (vm_load_pe_with_dlls(&vm, exe_path, ntdll_path) != 0) {
+            fprintf(stderr, "Failed to load PE with DLLs: %s\n", exe_path);
+            ret = 1;
+            goto cleanup;
+        }
+    } else {
+        /* Use legacy loader (no DLL imports) */
+        if (vm_load_pe(&vm, exe_path) != 0) {
+            fprintf(stderr, "Failed to load PE: %s\n", exe_path);
+            ret = 1;
+            goto cleanup;
+        }
     }
 
     /* Set up GDT */
