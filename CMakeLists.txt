@@ -129,6 +129,7 @@ set(VM_SOURCES
     src/nt/vfs_jail.c
     src/nt/sys_file.c
     src/nt/sys_process.c
+    src/nt/win32k_dispatcher.c
     src/process/process.c
     src/loader/module.c
     src/loader/exports.c
@@ -136,6 +137,10 @@ set(VM_SOURCES
     src/loader/stubs.c
     src/loader/loader.c
     src/gdi/display.c
+    src/gdi/gdi_handle_table.c
+    src/gdi/gdi_dc.c
+    src/gdi/gdi_drawing.c
+    src/gdi/gdi_text.c
 )
 
 # WBOX VM library

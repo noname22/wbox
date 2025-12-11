@@ -4,6 +4,7 @@
  */
 #include "syscalls.h"
 #include "win32k_syscalls.h"
+#include "win32k_dispatcher.h"
 #include "heap.h"
 #include "../cpu/cpu.h"
 #include "../cpu/mem.h"
@@ -318,10 +319,9 @@ int nt_syscall_handler(void)
         default:
             /* Check if this is a win32k syscall */
             if (syscall_num >= WIN32K_SYSCALL_BASE) {
-                /* Win32k syscall - return STATUS_NOT_IMPLEMENTED without exiting */
-                printf("[win32k] Unimplemented: %s (0x%x)\n",
-                       syscall_get_name(syscall_num), syscall_num);
-                syscall_return(STATUS_NOT_IMPLEMENTED);
+                /* Win32k syscall - dispatch to GDI/USER handler */
+                result = win32k_syscall_dispatch(syscall_num);
+                syscall_return(result);
                 return 1;
             }
 

@@ -615,9 +615,12 @@
 #define NtUserRemoteStopScreenUpdates        (WIN32K_SYSCALL_BASE + 599)
 #define NtUserCtxDisplayIOCtl                (WIN32K_SYSCALL_BASE + 600)
 
+/* WBOX-specific user syscalls (using reserved slots 601-603) */
+#define NtUserReleaseDC                      (WIN32K_SYSCALL_BASE + 601)
+
 /*
  * Engine/DDI Syscalls (604-740)
- * Note: Numbers 601-603 are unused/reserved
+ * Note: Numbers 602-603 are unused/reserved
  */
 #define NtGdiEngAssociateSurface             (WIN32K_SYSCALL_BASE + 604)
 #define NtGdiEngCreateBitmap                 (WIN32K_SYSCALL_BASE + 605)
