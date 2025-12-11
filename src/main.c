@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "cpu/cpu.h"
 #include "cpu/mem.h"
@@ -24,35 +25,65 @@ static void print_usage(const char *progname)
     fprintf(stderr, "A DOSBox-like emulator for 32-bit Windows applications\n\n");
     fprintf(stderr, "Usage: %s [options] <executable.exe>\n\n", progname);
     fprintf(stderr, "Options:\n");
-    fprintf(stderr, "  --jail <path>   Confine file access to specified directory\n");
-    fprintf(stderr, "  --ntdll <path>  Path to ntdll.dll (for DLL import support)\n");
+    fprintf(stderr, "  -C: <path>    Map C: drive to host directory\n");
+    fprintf(stderr, "  -D: <path>    Map D: drive to host directory (etc. for A-Z)\n");
+    fprintf(stderr, "  --jail <path> Legacy: Map C: drive to host directory\n");
+    fprintf(stderr, "\nExamples:\n");
+    fprintf(stderr, "  %s -C: ~/winxp ./tests/pe/hello.exe\n", progname);
+    fprintf(stderr, "  %s -C: ~/winxp -D: ./tests/pe ./tests/pe/import_test.exe\n", progname);
+    fprintf(stderr, "\nDLL resolution:\n");
+    fprintf(stderr, "  ntdll.dll is automatically loaded from C:\\WINDOWS\\system32\n");
     fprintf(stderr, "\nCurrently supports:\n");
     fprintf(stderr, "  - Static 32-bit PE executables\n");
     fprintf(stderr, "  - Console applications (CUI)\n");
-    fprintf(stderr, "  - DLL imports from ntdll.dll (with --ntdll option)\n");
+    fprintf(stderr, "  - DLL imports from ntdll.dll (requires C: drive mapping)\n");
+}
+
+/* Check if argument is a drive letter option like "-C:" */
+static int is_drive_option(const char *arg)
+{
+    if (arg[0] == '-' &&
+        ((arg[1] >= 'A' && arg[1] <= 'Z') || (arg[1] >= 'a' && arg[1] <= 'z')) &&
+        arg[2] == ':' &&
+        arg[3] == '\0') {
+        return 1;
+    }
+    return 0;
 }
 
 int main(int argc, char *argv[])
 {
     int ret = 0;
     const char *exe_path = NULL;
-    const char *jail_path = NULL;
-    const char *ntdll_path = NULL;
+    char drive_mappings[26][4096] = {{0}};  /* A-Z drive paths */
+    int num_drives = 0;
 
     /* Parse command line options */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--jail") == 0) {
+        if (is_drive_option(argv[i])) {
+            /* -C: <path>, -D: <path>, etc. */
+            char drive = toupper(argv[i][1]);
+            int index = drive - 'A';
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: -%c: requires a path argument\n", drive);
+                return 1;
+            }
+            strncpy(drive_mappings[index], argv[++i], sizeof(drive_mappings[index]) - 1);
+            num_drives++;
+        } else if (strcmp(argv[i], "--jail") == 0) {
+            /* Legacy --jail option maps to C: */
             if (i + 1 >= argc) {
                 fprintf(stderr, "Error: --jail requires a path argument\n");
                 return 1;
             }
-            jail_path = argv[++i];
+            strncpy(drive_mappings[2], argv[++i], sizeof(drive_mappings[2]) - 1);  /* C: = index 2 */
+            num_drives++;
         } else if (strcmp(argv[i], "--ntdll") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Error: --ntdll requires a path argument\n");
-                return 1;
+            /* Legacy --ntdll option - now deprecated, ignore */
+            fprintf(stderr, "Warning: --ntdll is deprecated, ntdll.dll is now loaded from VFS\n");
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                i++;  /* Skip the path argument */
             }
-            ntdll_path = argv[++i];
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -97,19 +128,33 @@ int main(int argc, char *argv[])
         goto cleanup;
     }
 
-    /* Initialize VFS jail if specified */
-    if (jail_path) {
-        printf("Initializing VFS jail: %s\n", jail_path);
-        if (vfs_jail_init(&vm.vfs_jail, jail_path) != 0) {
-            fprintf(stderr, "Failed to initialize VFS jail at '%s'\n", jail_path);
-            ret = 1;
-            goto cleanup;
+    /* Initialize VFS with drive mappings */
+    vfs_init(&vm.vfs_jail);
+    for (int i = 0; i < 26; i++) {
+        if (drive_mappings[i][0] != '\0') {
+            char drive = 'A' + i;
+            printf("Mapping drive %c: -> %s\n", drive, drive_mappings[i]);
+            if (vfs_map_drive(&vm.vfs_jail, drive, drive_mappings[i]) != 0) {
+                fprintf(stderr, "Failed to map drive %c: to '%s'\n", drive, drive_mappings[i]);
+                ret = 1;
+                goto cleanup;
+            }
+        }
+    }
+
+    /* Check if ntdll.dll can be found (only if any drive is mapped) */
+    char ntdll_path[VFS_MAX_PATH] = {0};
+    bool has_ntdll = false;
+    if (num_drives > 0) {
+        if (vfs_find_dll(&vm.vfs_jail, "ntdll.dll", ntdll_path) == 0) {
+            printf("Found ntdll.dll at: %s\n", ntdll_path);
+            has_ntdll = true;
         }
     }
 
     /* Load PE executable */
     printf("\nLoading PE executable...\n");
-    if (ntdll_path) {
+    if (has_ntdll) {
         /* Use new loader with DLL support */
         printf("Using DLL loader (ntdll: %s)\n", ntdll_path);
         if (vm_load_pe_with_dlls(&vm, exe_path, ntdll_path) != 0) {
