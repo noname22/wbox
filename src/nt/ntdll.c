@@ -3,6 +3,7 @@
  * Handles SYSENTER calls from userspace, dispatches to syscall implementations
  */
 #include "syscalls.h"
+#include "win32k_syscalls.h"
 #include "../cpu/cpu.h"
 #include "../cpu/mem.h"
 #include "../vm/vm.h"
@@ -67,7 +68,16 @@ int nt_syscall_handler(void)
             return 1;
 
         default:
-            /* Unimplemented syscall - print info and exit */
+            /* Check if this is a win32k syscall */
+            if (syscall_num >= WIN32K_SYSCALL_BASE) {
+                /* Win32k syscall - return STATUS_NOT_IMPLEMENTED without exiting */
+                printf("[win32k] Unimplemented: %s (0x%x)\n",
+                       syscall_get_name(syscall_num), syscall_num);
+                syscall_return(STATUS_NOT_IMPLEMENTED);
+                return 1;
+            }
+
+            /* Unimplemented NT syscall - print info and exit */
             printf("\n=== UNIMPLEMENTED SYSCALL ===\n");
             printf("Number: 0x%03X (%d)\n", syscall_num, syscall_num);
             printf("Name:   %s\n", syscall_get_name(syscall_num));

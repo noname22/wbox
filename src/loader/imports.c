@@ -6,6 +6,7 @@
 #include "exports.h"
 #include "stubs.h"
 #include "ntdll_stubs.h"
+#include "win32k_stubs.h"
 #include "../vm/vm.h"
 #include "../cpu/mem.h"
 
@@ -26,9 +27,11 @@ const IMAGE_IMPORT_DESCRIPTOR *imports_get_directory(const pe_image_t *pe)
 
 bool imports_dll_uses_stubs(const char *dll_name)
 {
-    /* Currently only ntdll.dll uses stubs */
+    /* ntdll.dll and win32u.dll use stubs */
     return strcasecmp(dll_name, "ntdll.dll") == 0 ||
-           strcasecmp(dll_name, "ntdll") == 0;
+           strcasecmp(dll_name, "ntdll") == 0 ||
+           strcasecmp(dll_name, "win32u.dll") == 0 ||
+           strcasecmp(dll_name, "win32u") == 0;
 }
 
 uint32_t imports_resolve_function(module_manager_t *mgr, vm_context_t *vm,
@@ -41,7 +44,19 @@ uint32_t imports_resolve_function(module_manager_t *mgr, vm_context_t *vm,
 
     /* First, check if this is a known function that should use a stub */
     if (func_name && imports_dll_uses_stubs(dll_mod->name)) {
-        const stub_def_t *stub_def = ntdll_lookup_stub(func_name);
+        const stub_def_t *stub_def = NULL;
+
+        /* Check ntdll stubs */
+        if (strcasecmp(dll_mod->name, "ntdll.dll") == 0 ||
+            strcasecmp(dll_mod->name, "ntdll") == 0) {
+            stub_def = ntdll_lookup_stub(func_name);
+        }
+        /* Check win32k stubs (win32u.dll) */
+        else if (strcasecmp(dll_mod->name, "win32u.dll") == 0 ||
+                 strcasecmp(dll_mod->name, "win32u") == 0) {
+            stub_def = win32k_lookup_stub(func_name);
+        }
+
         if (stub_def) {
             /* Generate or reuse stub */
             uint32_t stub_va = stubs_get_or_create(stubs, vm, stub_def);
