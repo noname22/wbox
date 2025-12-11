@@ -313,9 +313,16 @@
 /* NTSTATUS values */
 #define STATUS_SUCCESS              0x00000000
 #define STATUS_NOT_IMPLEMENTED      0xC0000002
+#define STATUS_INVALID_HANDLE       0xC0000008
 #define STATUS_INVALID_PARAMETER    0xC000000D
+#define STATUS_NO_MEMORY            0xC0000017
 #define STATUS_ACCESS_DENIED        0xC0000022
 #define STATUS_BUFFER_TOO_SMALL     0xC0000023
+#define STATUS_OBJECT_TYPE_MISMATCH 0xC0000024
+#define STATUS_IO_DEVICE_ERROR      0xC0000185
+
+/* Syscall handler return type */
+typedef uint32_t ntstatus_t;
 
 /*
  * Get syscall name by number
@@ -333,5 +340,11 @@ int nt_syscall_handler(void);
  */
 void nt_install_syscall_handler(void);
 void nt_remove_syscall_handler(void);
+
+/*
+ * Individual syscall implementations
+ */
+ntstatus_t sys_NtWriteFile(void);
+ntstatus_t sys_NtTerminateProcess(void);
 
 #endif /* WBOX_SYSCALLS_H */

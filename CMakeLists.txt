@@ -124,6 +124,9 @@ set(VM_SOURCES
     src/vm/paging.c
     src/nt/ntdll.c
     src/nt/syscall_table.c
+    src/nt/handles.c
+    src/nt/sys_file.c
+    src/nt/sys_process.c
     src/process/process.c
 )
 

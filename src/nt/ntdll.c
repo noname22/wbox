@@ -1,12 +1,29 @@
 /*
  * WBOX NT Syscall Dispatcher
- * Handles SYSENTER calls from userspace, prints syscall name, and exits
+ * Handles SYSENTER calls from userspace, dispatches to syscall implementations
  */
 #include "syscalls.h"
 #include "../cpu/cpu.h"
+#include "../cpu/mem.h"
 #include "../vm/vm.h"
 
 #include <stdio.h>
+
+/*
+ * Return from syscall to user mode
+ * Sets EAX to return value and jumps back to user code
+ */
+static void syscall_return(ntstatus_t status)
+{
+    /* Set return value */
+    EAX = status;
+
+    /* Read return address from user stack (EDX points to stack) */
+    uint32_t return_addr = readmemll(EDX);
+    cpu_state.pc = return_addr;
+
+    /* Segment registers are already set for Ring 3 from VM setup */
+}
 
 /*
  * NT syscall handler - called when SYSENTER is executed
@@ -15,33 +32,39 @@
 int nt_syscall_handler(void)
 {
     uint32_t syscall_num = EAX;
-    const char *name = syscall_get_name(syscall_num);
+    ntstatus_t result;
 
-    printf("\n=== SYSCALL ===\n");
-    printf("Number: 0x%03X (%d)\n", syscall_num, syscall_num);
-    printf("Name:   %s\n", name);
-    printf("\nRegisters:\n");
-    printf("  EAX=%08X (syscall number)\n", EAX);
-    printf("  ECX=%08X (arg pointer/stack)\n", ECX);
-    printf("  EDX=%08X (return address)\n", EDX);
-    printf("  EBX=%08X ESI=%08X EDI=%08X\n", EBX, ESI, EDI);
-    printf("  ESP=%08X EBP=%08X\n", ESP, EBP);
-    printf("  EIP=%08X (before SYSENTER)\n", cpu_state.pc);
+    /* Dispatch to specific syscall handler */
+    switch (syscall_num) {
+        case NtWriteFile:
+            result = sys_NtWriteFile();
+            syscall_return(result);
+            return 1;
 
-    /* Set return value to STATUS_NOT_IMPLEMENTED */
-    EAX = STATUS_NOT_IMPLEMENTED;
+        case NtTerminateProcess:
+            result = sys_NtTerminateProcess();
+            /* NtTerminateProcess exits, no return to user mode */
+            return 1;
 
-    /* Request VM exit */
-    vm_context_t *vm = vm_get_context();
-    if (vm) {
-        vm_request_exit(vm, STATUS_NOT_IMPLEMENTED);
+        default:
+            /* Unimplemented syscall - print info and exit */
+            printf("\n=== UNIMPLEMENTED SYSCALL ===\n");
+            printf("Number: 0x%03X (%d)\n", syscall_num, syscall_num);
+            printf("Name:   %s\n", syscall_get_name(syscall_num));
+            printf("\nRegisters:\n");
+            printf("  EAX=%08X (syscall number)\n", EAX);
+            printf("  EDX=%08X (args pointer)\n", EDX);
+            printf("  ESP=%08X EBP=%08X\n", ESP, EBP);
+
+            /* Exit with STATUS_NOT_IMPLEMENTED */
+            EAX = STATUS_NOT_IMPLEMENTED;
+            vm_context_t *vm = vm_get_context();
+            if (vm) {
+                vm_request_exit(vm, STATUS_NOT_IMPLEMENTED);
+            }
+            cpu_exit_requested = 1;
+            return 1;
     }
-
-    /* Signal CPU loop to exit immediately */
-    cpu_exit_requested = 1;
-
-    /* Return 1 to indicate we handled the syscall and should skip normal processing */
-    return 1;
 }
 
 /*

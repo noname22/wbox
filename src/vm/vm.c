@@ -86,6 +86,9 @@ int vm_init(vm_context_t *vm)
     /* Set global context for syscall handler */
     g_vm_context = vm;
 
+    /* Initialize handle table with stdin/stdout/stderr */
+    handles_init(&vm->handles);
+
     /* Initialize paging at 1MB physical */
     paging_init(&vm->paging, PAGING_PHYS_BASE, VM_PHYS_MEM_SIZE);
 
@@ -208,21 +211,27 @@ int vm_load_pe(vm_context_t *vm, const char *path)
         return -1;
     }
 
-    /* Allocate and map user stack */
-    uint32_t stack_phys = paging_alloc_phys(&vm->paging, VM_USER_STACK_SIZE);
+    /* Allocate and map user stack
+     * We need to map the entire range from the page containing stack_base
+     * to the page containing stack_top (inclusive).
+     */
+    uint32_t stack_base_page = vm->stack_base & PAGE_MASK;
+    uint32_t stack_top_page = vm->stack_top & PAGE_MASK;
+    uint32_t stack_map_size = (stack_top_page - stack_base_page) + PAGE_SIZE;
+    uint32_t stack_phys = paging_alloc_phys(&vm->paging, stack_map_size);
     if (stack_phys == 0) {
         fprintf(stderr, "vm_load_pe: failed to allocate stack\n");
         pe_free(&pe);
         return -1;
     }
-    if (paging_map_range(&vm->paging, vm->stack_base, stack_phys,
-                         VM_USER_STACK_SIZE, PTE_USER | PTE_WRITABLE) != 0) {
+    if (paging_map_range(&vm->paging, stack_base_page, stack_phys,
+                         stack_map_size, PTE_USER | PTE_WRITABLE) != 0) {
         fprintf(stderr, "vm_load_pe: failed to map stack\n");
         pe_free(&pe);
         return -1;
     }
-    printf("User stack: 0x%08X-0x%08X (phys 0x%08X)\n",
-           vm->stack_base, vm->stack_top, stack_phys);
+    printf("User stack: 0x%08X-0x%08X (phys 0x%08X, mapped 0x%X bytes)\n",
+           vm->stack_base, vm->stack_top, stack_phys, stack_map_size);
 
     /* Allocate and map TEB */
     uint32_t teb_phys = paging_alloc_phys(&vm->paging, PAGE_SIZE);
@@ -376,6 +385,13 @@ void vm_setup_cpu_state(vm_context_t *vm)
 
     /* Enable 32-bit operand/address mode */
     use32 = 0x300;
+
+    /* Set CPU status flags for protected mode with flat 32-bit segments */
+    cpu_cur_status = CPU_STATUS_USE32 | CPU_STATUS_STACK32 | CPU_STATUS_PMODE;
+    /* NOTFLATDS and NOTFLATSS are cleared (flat segments) */
+
+    /* Set stack32 global variable (separate from cpu_cur_status) */
+    stack32 = 1;
 
     /* Set segment registers */
     cpu_state.seg_cs.seg = VM_SEL_USER_CODE;

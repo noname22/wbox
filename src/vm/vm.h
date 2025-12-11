@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include "paging.h"
 #include "../pe/pe_loader.h"
+#include "../nt/handles.h"
 
 /* Memory layout constants */
 #define VM_PHYS_MEM_SIZE       (256 * 1024 * 1024)  /* 256MB physical memory */
@@ -62,6 +63,9 @@ typedef struct {
     /* Exit flag */
     volatile int exit_requested;
     uint32_t exit_code;
+
+    /* Handle table for files, etc. */
+    handle_table_t handles;
 } vm_context_t;
 
 /*
