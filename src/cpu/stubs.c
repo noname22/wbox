@@ -28,6 +28,7 @@
 /* Global CPU configuration */
 /* Note: cpu_override is defined in cpu.c */
 int cpu = 0;
+int cpu_exit_requested = 0;  /* WBOX: Flag to exit CPU loop immediately */
 int fpu_type = 0;
 int fpu_softfloat = 1;
 int machine = 0;
@@ -84,7 +85,8 @@ void io_handler(int set, uint16_t base, int size,
 
 /* Timer globals */
 /* Note: tsc is defined in cpu.c */
-uint32_t timer_target = 0;
+/* Set timer_target to 0x7FFFFFFE so cycle_period = 0x7FFFFFFF (INT32_MAX) */
+uint32_t timer_target = 0x7FFFFFFE;
 uint64_t TIMER_USEC = 1000;
 
 /* PIC globals */

@@ -48,6 +48,9 @@ uint32_t dr[8];
 uint32_t use32;
 int      stack32;
 
+/* WBOX syscall callback - called before normal SYSENTER processing */
+sysenter_callback_t sysenter_callback = NULL;
+
 int      cpu_init = 0;
 
 uint32_t *eal_r;
@@ -1787,6 +1790,11 @@ cpu_386_check_instruction_fault(void)
 int
 sysenter(UNUSED(uint32_t fetchdat))
 {
+    /* WBOX: Call syscall callback if registered */
+    if (sysenter_callback) {
+        return sysenter_callback();
+    }
+
 #ifdef ENABLE_386_COMMON_LOG
     x386_common_log("SYSENTER called\n");
 #endif

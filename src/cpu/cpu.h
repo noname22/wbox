@@ -21,6 +21,8 @@
 #ifndef EMU_CPU_H
 #define EMU_CPU_H
 
+#include <stdint.h>
+
 enum {
     FPU_NONE,
     FPU_8087,
@@ -619,6 +621,7 @@ extern int cpu_mem_prefetch_cycles;
 extern int cpu_rom_prefetch_cycles;
 extern int cpu_waitstates;
 extern int cpu_flush_pending;
+extern int cpu_exit_requested;  /* WBOX: Flag to exit CPU loop immediately */
 extern int cpu_old_paging;
 extern int cpu_cache_int_enabled;
 extern int cpu_cache_ext_enabled;
@@ -731,6 +734,10 @@ extern int sysenter(uint32_t fetchdat);
 extern int sysexit(uint32_t fetchdat);
 extern int syscall_op(uint32_t fetchdat);
 extern int sysret(uint32_t fetchdat);
+
+/* WBOX syscall callback - called before normal SYSENTER processing */
+typedef int (*sysenter_callback_t)(void);
+extern sysenter_callback_t sysenter_callback;
 
 extern cpu_family_t *cpu_get_family(const char *internal_name);
 extern uint8_t       cpu_is_eligible(const cpu_family_t *cpu_family, int cpu, int machine);

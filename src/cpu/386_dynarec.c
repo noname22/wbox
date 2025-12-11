@@ -949,6 +949,13 @@ exec386(int32_t cycs)
                 cpu_state.eflags &= ~(RF_FLAG);
 #endif
                 x86_opcodes[(opcode | cpu_state.op32) & 0x3ff](fetchdat);
+
+                /* WBOX: Check if exit was requested (e.g., by syscall handler) */
+                if (cpu_exit_requested) {
+                    cycles = 0;  /* Force outer loop to exit too */
+                    break;
+                }
+
                 if (x86_was_reset)
                     break;
             }

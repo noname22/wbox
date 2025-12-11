@@ -6,7 +6,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(SDL3 REQUIRED)
+# SDL3 is optional for GUI mode (not used in Phase 1)
+find_package(SDL3 QUIET)
 
 # Detect host architecture for dynarec
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
@@ -116,11 +117,27 @@ target_compile_definitions(wbox_cpu PUBLIC
     USE_NEW_DYNAREC
 )
 
+# VM and NT subsystem sources
+set(VM_SOURCES
+    src/pe/pe_loader.c
+    src/vm/vm.c
+    src/vm/paging.c
+    src/nt/ntdll.c
+    src/nt/syscall_table.c
+    src/process/process.c
+)
+
+# WBOX VM library
+add_library(wbox_vm STATIC ${VM_SOURCES})
+target_include_directories(wbox_vm PUBLIC src)
+target_link_libraries(wbox_vm PUBLIC wbox_cpu)
+
 add_executable(wbox
     src/main.c
 )
 
-target_link_libraries(wbox PRIVATE wbox_cpu SDL3::SDL3)
+target_include_directories(wbox PRIVATE src)
+target_link_libraries(wbox PRIVATE wbox_vm)
 
 # Warnings
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
