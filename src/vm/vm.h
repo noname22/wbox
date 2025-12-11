@@ -11,9 +11,13 @@
 #include "../pe/pe_loader.h"
 #include "../nt/handles.h"
 #include "../nt/vfs_jail.h"
+#include "../gdi/display.h"
 
 /* Forward declaration for loader */
 struct loader_context;
+
+/* Forward declaration for heap */
+struct heap_state;
 
 /* Memory layout constants */
 #define VM_PHYS_MEM_SIZE       (256 * 1024 * 1024)  /* 256MB physical memory */
@@ -22,6 +26,7 @@ struct loader_context;
 #define VM_USER_STACK_SIZE     (64 * 1024)          /* 64KB stack */
 #define VM_TEB_ADDR            0x7FFDF000           /* Thread Environment Block */
 #define VM_PEB_ADDR            0x7FFDE000           /* Process Environment Block */
+#define VM_KUSD_ADDR           0x7FFE0000           /* KUSER_SHARED_DATA */
 #define VM_DEFAULT_IMAGE_BASE  0x00400000           /* Default PE load address */
 
 /* GDT selector values */
@@ -39,7 +44,7 @@ struct loader_context;
 #define VM_INITIAL_EFLAGS      0x00000202  /* IF=1 */
 
 /* Virtual machine context */
-typedef struct {
+typedef struct vm_context {
     /* Paging context */
     paging_context_t paging;
 
@@ -68,6 +73,10 @@ typedef struct {
     volatile int exit_requested;
     uint32_t exit_code;
 
+    /* DLL initialization state */
+    volatile int dll_init_done;      /* Set by special syscall when DllMain returns */
+    uint32_t dll_init_stub_addr;     /* Address of DLL init return stub */
+
     /* Handle table for files, etc. */
     handle_table_t handles;
 
@@ -76,6 +85,13 @@ typedef struct {
 
     /* Loader context (optional, for DLL loading) */
     struct loader_context *loader;
+
+    /* Heap context (for RtlAllocateHeap interception) */
+    struct heap_state *heap;
+
+    /* Display context (for GUI applications) */
+    display_context_t display;
+    bool gui_mode;
 } vm_context_t;
 
 /*
@@ -129,6 +145,22 @@ void vm_start(vm_context_t *vm);
  * Request VM exit (called from syscall handler)
  */
 void vm_request_exit(vm_context_t *vm, uint32_t code);
+
+/*
+ * Call a DLL entry point (DllMain)
+ * entry_point: VA of DLL's entry point
+ * base_va: DLL base address (passed as hModule)
+ * reason: DLL_PROCESS_ATTACH=1, DLL_PROCESS_DETACH=0
+ * Returns: TRUE if DllMain returned TRUE, FALSE otherwise
+ */
+int vm_call_dll_entry(vm_context_t *vm, uint32_t entry_point, uint32_t base_va, uint32_t reason);
+
+/*
+ * Initialize all loaded DLLs by calling their entry points
+ * Must be called after vm_load_pe_with_dlls and vm_setup_cpu_state
+ * Returns 0 on success, -1 on failure
+ */
+int vm_init_dlls(vm_context_t *vm);
 
 /*
  * Get the global VM context (for syscall handler)

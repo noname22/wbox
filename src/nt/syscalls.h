@@ -310,6 +310,21 @@
 /* Win32k syscalls start at 0x1000 */
 #define WIN32K_SYSCALL_BASE  0x1000
 
+/* Special internal syscalls for VM control */
+#define WBOX_SYSCALL_DLL_INIT_DONE  0xFFFE  /* DLL entry point completed */
+
+/* Pseudo syscalls for heap function interception */
+#define WBOX_SYSCALL_HEAP_ALLOC    0xFFF0  /* RtlAllocateHeap */
+#define WBOX_SYSCALL_HEAP_FREE     0xFFF1  /* RtlFreeHeap */
+#define WBOX_SYSCALL_HEAP_REALLOC  0xFFF2  /* RtlReAllocateHeap */
+#define WBOX_SYSCALL_HEAP_SIZE     0xFFF3  /* RtlSizeHeap */
+
+/* Pseudo syscalls for string conversion function interception */
+#define WBOX_SYSCALL_MBSTR_TO_UNICODE  0xFFE0  /* RtlMultiByteToUnicodeN */
+#define WBOX_SYSCALL_UNICODE_TO_MBSTR  0xFFE1  /* RtlUnicodeToMultiByteN */
+#define WBOX_SYSCALL_MBSTR_SIZE        0xFFE2  /* RtlMultiByteToUnicodeSize */
+#define WBOX_SYSCALL_UNICODE_SIZE      0xFFE3  /* RtlUnicodeToMultiByteSize */
+
 /* NTSTATUS values */
 #define STATUS_SUCCESS              0x00000000
 #define STATUS_END_OF_FILE          0xC0000011
@@ -396,5 +411,6 @@ ntstatus_t sys_NtOpenFile(void);
 ntstatus_t sys_NtReadFile(void);
 ntstatus_t sys_NtWriteFile(void);
 ntstatus_t sys_NtTerminateProcess(void);
+ntstatus_t sys_NtQueryPerformanceCounter(void);
 
 #endif /* WBOX_SYSCALLS_H */

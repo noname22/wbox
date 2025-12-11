@@ -315,6 +315,14 @@ mmutranslatereal_normal(uint32_t addr, int rw)
         ((CPL == 3) && !(temp3 & 4) && !cpl_override) ||
         (rw && !cpl_override && !(temp3 & 2) &&
          (((CPL == 3) && !cpl_override) || (cr0 & WP_FLAG)))) {
+        /* WBOX: Trace page fault with recent instruction history */
+        static int pf_count = 0;
+        if (pf_count < 5) {
+            fprintf(stderr, "[PF#%d] VA=0x%08X rw=%d CPL=%d temp3=0x%08X PC=0x%08X\n",
+                    pf_count, addr, rw, CPL, temp3, cpu_state.pc);
+            fprintf(stderr, "  oldpc=0x%08X\n", cpu_state.oldpc);
+            pf_count++;
+        }
         cr2 = addr;
         temp &= 1;
         if (CPL == 3)
@@ -603,17 +611,29 @@ addwritelookup(uint32_t virt, uint32_t phys)
  * For identity mapping (real mode): returns ram
  * For paged mapping: returns ram + (phys_page - virt_page)
  */
+static int getpccache_trace_count = 0;
+
 uint8_t *
 getpccache(uint32_t a)
 {
     uint64_t phys = (uint64_t) a;
     uint32_t virt = a;
 
+    /* Trace first few code fetches */
+    if (getpccache_trace_count < 10) {
+        fprintf(stderr, "getpccache[%d]: VA=0x%08X\n", getpccache_trace_count, virt);
+        getpccache_trace_count++;
+    }
+
     /* Handle paging if enabled */
     if (cr0 >> 31) {
         phys = mmutranslate_read(virt);
-        if (phys == 0xffffffffffffffffULL)
-            return ram;  /* Return RAM base on translation failure */
+        if (phys == 0xffffffffffffffffULL) {
+            fprintf(stderr, "getpccache: MMU translation failed for VA 0x%08X (page=0x%05X)\n",
+                    virt, virt >> 12);
+            cpu_state.abrt = ABRT_PF;  /* Set page fault instead of returning invalid pointer */
+            return (uint8_t *) &ff_pccache;
+        }
     }
     phys &= rammask;
 

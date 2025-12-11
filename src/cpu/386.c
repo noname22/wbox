@@ -240,6 +240,13 @@ exec386_2386(int32_t cycs)
         x86_was_reset = 0;
         cycdiff       = 0;
         oldcyc        = cycles;
+
+        /* WBOX: Ring buffer for instruction trace */
+        static uint32_t eip_trace[32];
+        static uint16_t cs_trace[32];
+        static int trace_idx = 0;
+        static int trace_count = 0;
+
         while (cycdiff < cycle_period) {
             int ins_fetch_fault = 0;
             ins_cycles = cycles;
@@ -249,6 +256,13 @@ exec386_2386(int32_t cycs)
             oldcpl = CPL;
 #endif
             cpu_state.oldpc = cpu_state.pc;
+
+            /* WBOX: Record this instruction */
+            eip_trace[trace_idx] = cpu_state.pc;
+            cs_trace[trace_idx] = CS;
+            trace_idx = (trace_idx + 1) & 31;
+            if (trace_count < 32) trace_count++;
+
             cpu_state.op32  = use32;
 
 #ifndef USE_NEW_DYNAREC
@@ -259,6 +273,21 @@ exec386_2386(int32_t cycs)
             cpu_state.ssegs  = 0;
 
             fetchdat = fastreadl_fetch(cs + cpu_state.pc);
+
+            /* WBOX: Trace ALL fetches for first N instructions */
+            static int fetch_trace_count = 0;
+            uint32_t fetch_addr = cs + cpu_state.pc;
+            if (fetch_trace_count < 100) {
+                fprintf(stderr, "[FETCH#%d] cs=0x%08X PC=0x%08X addr=0x%08X fetchdat=0x%08X abrt=%d\n",
+                        fetch_trace_count, cs, cpu_state.pc, fetch_addr, fetchdat, cpu_state.abrt);
+                fetch_trace_count++;
+            }
+            /* Trace low memory fetches */
+            if (fetch_addr < 0x00100000 && fetch_addr != 0) {
+                fprintf(stderr, "[FETCH LOW] cs=0x%08X PC=0x%08X addr=0x%08X fetchdat=0x%08X abrt=%d\n",
+                        cs, cpu_state.pc, fetch_addr, fetchdat, cpu_state.abrt);
+            }
+
             ol = opcode_length[fetchdat & 0xff];
             if ((ol == 3) && opcode_has_modrm[fetchdat & 0xff] && (((fetchdat >> 14) & 0x03) == 0x03))
                 ol = 2;
@@ -280,6 +309,20 @@ exec386_2386(int32_t cycs)
                 if (in_smm)
                     x386_log("[%04X:%08X] %08X\n", CS, cpu_state.pc, fetchdat);
 #endif
+                /* WBOX: Trace execution in kernel32.dll range or suspicious addresses */
+                static int exec_trace_count = 0;
+                if (exec_trace_count < 50 &&
+                    (cpu_state.pc >= 0x7C500000 && cpu_state.pc < 0x7C600000)) {
+                    fprintf(stderr, "[EXEC] %04X:%08X fetchdat=%08X op=%02X\n",
+                            CS, cpu_state.pc, fetchdat, fetchdat & 0xFF);
+                    exec_trace_count++;
+                }
+                /* Also trace any jump to low memory */
+                if (cpu_state.pc < 0x00100000 && cpu_state.pc != 0) {
+                    fprintf(stderr, "[EXEC LOW] %04X:%08X fetchdat=%08X op=%02X\n",
+                            CS, cpu_state.pc, fetchdat, fetchdat & 0xFF);
+                }
+
                 opcode = fetchdat & 0xFF;
                 fetchdat >>= 8;
                 trap |= !!(cpu_state.flags & T_FLAG);
@@ -314,6 +357,19 @@ exec386_2386(int32_t cycs)
 
 block_ended:
             if (cpu_state.abrt) {
+                /* WBOX: Print instruction trace on abort */
+                static int trace_printed = 0;
+                if (!trace_printed && trace_count > 0) {
+                    fprintf(stderr, "\n=== Instruction trace (last %d) ===\n",
+                            trace_count < 16 ? trace_count : 16);
+                    int num = trace_count < 16 ? trace_count : 16;
+                    for (int i = 0; i < num; i++) {
+                        int idx = (trace_idx - num + i + 32) & 31;
+                        fprintf(stderr, "  [%2d] %04X:%08X\n", i, cs_trace[idx], eip_trace[idx]);
+                    }
+                    trace_printed = 1;
+                }
+
                 flags_rebuild();
                 tempi          = cpu_state.abrt & ABRT_MASK;
                 cpu_state.abrt = 0;

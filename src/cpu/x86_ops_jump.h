@@ -358,10 +358,17 @@ static int
 opRET_l(UNUSED(uint32_t fetchdat))
 {
     uint32_t ret;
+    uint32_t old_esp = ESP;  /* WBOX: save for debugging */
 
     ret = POP_L();
     if (cpu_state.abrt)
         return 1;
+
+    /* WBOX: Trace RET to detect bad return addresses */
+    if (ret < 0x00100000 || ret > 0x80000000) {
+        fprintf(stderr, "[RET_l] ESP=%08X ret=%08X (suspicious!)\n", old_esp, ret);
+    }
+
     cpu_state.pc = ret;
     CPU_BLOCK_END();
 

@@ -358,16 +358,15 @@ fastreadb(uint32_t a)
     read_type = 4;
 #    endif
 
-    if ((a >> 12) == pccache)
-        return *((uint8_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
-
-    t = getpccache(a);
-    if (cpu_state.abrt)
-        return 0;
-    pccache  = a >> 12;
-    pccache2 = t;
-
-    return *((uint8_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
+    if ((a >> 12) != pccache) {
+        t = getpccache(a);
+        if (cpu_state.abrt)
+            return 0;
+        pccache  = a >> 12;
+        pccache2 = t;
+    }
+    /* Use direct pointer arithmetic */
+    return pccache2[a];
 }
 
 static __inline uint16_t
@@ -386,17 +385,15 @@ fastreadw(uint32_t a)
         val |= (fastreadb(a + 1) << 8);
         return val;
     }
-    if ((a >> 12) == pccache)
-        return *((uint16_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
-
-    t = getpccache(a);
-    if (cpu_state.abrt)
-        return 0;
-
-    pccache  = a >> 12;
-    pccache2 = t;
-
-    return *((uint16_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
+    if ((a >> 12) != pccache) {
+        t = getpccache(a);
+        if (cpu_state.abrt)
+            return 0;
+        pccache  = a >> 12;
+        pccache2 = t;
+    }
+    /* Use direct pointer arithmetic */
+    return *((uint16_t *) &pccache2[a]);
 }
 
 static __inline uint32_t
@@ -420,8 +417,8 @@ fastreadl(uint32_t a)
             pccache2 = t;
             pccache  = a >> 12;
         }
-        
-        return *((uint32_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
+        /* Use direct pointer arithmetic */
+        return *((uint32_t *) &pccache2[a]);
     }
     val = fastreadw(a);
     val |= (fastreadw(a + 2) << 16);
@@ -432,12 +429,13 @@ fastreadl(uint32_t a)
 static __inline void *
 get_ram_ptr(uint32_t a)
 {
-    if ((a >> 12) == pccache)
-        return (void *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL));
-    else {
+    if ((a >> 12) != pccache) {
         uint8_t *t = getpccache(a);
-        return (void *) (((uintptr_t) &t[a] & 0x00000000ffffffffULL) | ((uintptr_t) &t[0] & 0xffffffff00000000ULL));
+        pccache = a >> 12;
+        pccache2 = t;
     }
+    /* Use direct pointer arithmetic */
+    return (void *) &pccache2[a];
 }
 
 extern int opcode_has_modrm[256];
@@ -505,17 +503,15 @@ fastreadw_fetch(uint32_t a)
             val |= (fastreadb(a + 1) << 8);
         return val;
     }
-    if ((a >> 12) == pccache)
-        return *((uint16_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
-    t = getpccache(a);
-    if (cpu_state.abrt)
-        return 0;
-
-    pccache  = a >> 12;
-    pccache2 = t;
-
-    return *((uint16_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
-
+    if ((a >> 12) != pccache) {
+        t = getpccache(a);
+        if (cpu_state.abrt)
+            return 0;
+        pccache  = a >> 12;
+        pccache2 = t;
+    }
+    /* Use direct pointer arithmetic */
+    return *((uint16_t *) &pccache2[a]);
 }
 
 static __inline uint32_t
@@ -539,11 +535,9 @@ fastreadl_fetch(uint32_t a)
             pccache2 = t;
             pccache  = a >> 12;
         }
-#    if (defined __amd64__ || defined _M_X64 || defined __aarch64__ || defined _M_ARM64)
-        return *((uint32_t *) (((uintptr_t) &pccache2[a] & 0x00000000ffffffffULL) | ((uintptr_t) &pccache2[0] & 0xffffffff00000000ULL)));
-#    else
-        return AS_U32(pccache2[a]);
-#    endif
+        /* Use direct pointer arithmetic - the biased pointer pccache2 is set up so that
+         * pccache2[a] gives us ram[physical_address]. No masking optimization needed. */
+        return *((uint32_t *) &pccache2[a]);
     }
     val = fastreadw_fetch(a);
     if (opcode_length[val & 0xff] > 2)

@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <libgen.h>
 #include <errno.h>
+#include <dirent.h>
 
 /* Static buffer for translated paths (legacy API) */
 static char translated_path[VFS_MAX_PATH];
@@ -466,6 +467,74 @@ bool vfs_path_is_safe(vfs_jail_t *vfs, const char *host_path)
     return result;
 }
 
+/*
+ * Case-insensitive directory entry lookup.
+ * Searches 'dir_path' for an entry matching 'name' case-insensitively.
+ * If found, appends the actual entry name to out_path.
+ * Returns 0 on success, -1 if not found.
+ */
+static int find_entry_icase(const char *dir_path, const char *name,
+                            char *out_path, size_t out_size)
+{
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        return -1;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcasecmp(entry->d_name, name) == 0) {
+            snprintf(out_path, out_size, "%s/%s", dir_path, entry->d_name);
+            closedir(dir);
+            return 0;
+        }
+    }
+
+    closedir(dir);
+    return -1;
+}
+
+/*
+ * Resolve a path with case-insensitive component matching.
+ * base_path: The starting directory (must exist, case-sensitive)
+ * rel_path: Relative path with components separated by '/'
+ * out_path: Buffer to receive the resolved path
+ * out_size: Size of out_path buffer
+ * Returns 0 on success, -1 if any component not found.
+ */
+static int resolve_path_icase(const char *base_path, const char *rel_path,
+                              char *out_path, size_t out_size)
+{
+    char current[VFS_MAX_PATH];
+    strncpy(current, base_path, sizeof(current) - 1);
+    current[sizeof(current) - 1] = '\0';
+
+    /* Make a copy of rel_path to tokenize */
+    char *path_copy = strdup(rel_path);
+    if (!path_copy) {
+        return -1;
+    }
+
+    char *saveptr;
+    char *component = strtok_r(path_copy, "/", &saveptr);
+
+    while (component != NULL) {
+        char next[VFS_MAX_PATH];
+        if (find_entry_icase(current, component, next, sizeof(next)) != 0) {
+            free(path_copy);
+            return -1;
+        }
+        strncpy(current, next, sizeof(current) - 1);
+        current[sizeof(current) - 1] = '\0';
+        component = strtok_r(NULL, "/", &saveptr);
+    }
+
+    free(path_copy);
+    strncpy(out_path, current, out_size - 1);
+    out_path[out_size - 1] = '\0';
+    return 0;
+}
+
 int vfs_find_dll(vfs_jail_t *vfs, const char *dll_name, char *out_path)
 {
     if (!vfs || !vfs->initialized || !dll_name || !out_path) {
@@ -480,35 +549,41 @@ int vfs_find_dll(vfs_jail_t *vfs, const char *dll_name, char *out_path)
     const char *c_drive = vfs->drives[2].host_path;
     struct stat st;
 
-    /* Try WINDOWS\system32\dll_name (case-insensitive search) */
+    /* System directory search paths (case-insensitive matching will be used) */
     static const char *system_paths[] = {
-        "WINDOWS/system32",
-        "WINDOWS/System32",
-        "Windows/system32",
-        "Windows/System32",
-        "windows/system32",
+        "reactos/system32",   /* ReactOS layout */
+        "windows/system32",   /* Windows XP layout */
+        "system32",           /* Direct system32 */
         NULL
     };
 
     for (const char **path = system_paths; *path != NULL; path++) {
-        snprintf(out_path, VFS_MAX_PATH, "%s/%s/%s", c_drive, *path, dll_name);
-        if (stat(out_path, &st) == 0 && S_ISREG(st.st_mode)) {
-            return 0;
+        /* Build the full relative path including the DLL name */
+        char rel_path[VFS_MAX_PATH];
+        snprintf(rel_path, sizeof(rel_path), "%s/%s", *path, dll_name);
+
+        if (resolve_path_icase(c_drive, rel_path, out_path, VFS_MAX_PATH) == 0) {
+            if (stat(out_path, &st) == 0 && S_ISREG(st.st_mode)) {
+                return 0;
+            }
         }
     }
 
-    /* Try WINDOWS\dll_name */
+    /* Try Windows directory directly */
     static const char *windows_paths[] = {
-        "WINDOWS",
-        "Windows",
+        "reactos",
         "windows",
         NULL
     };
 
     for (const char **path = windows_paths; *path != NULL; path++) {
-        snprintf(out_path, VFS_MAX_PATH, "%s/%s/%s", c_drive, *path, dll_name);
-        if (stat(out_path, &st) == 0 && S_ISREG(st.st_mode)) {
-            return 0;
+        char rel_path[VFS_MAX_PATH];
+        snprintf(rel_path, sizeof(rel_path), "%s/%s", *path, dll_name);
+
+        if (resolve_path_icase(c_drive, rel_path, out_path, VFS_MAX_PATH) == 0) {
+            if (stat(out_path, &st) == 0 && S_ISREG(st.st_mode)) {
+                return 0;
+            }
         }
     }
 

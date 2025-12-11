@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <ctype.h>
 
 #include "cpu/cpu.h"
@@ -17,6 +18,7 @@
 #include "vm/paging.h"
 #include "process/process.h"
 #include "nt/syscalls.h"
+#include "nt/heap.h"
 #include "nt/vfs_jail.h"
 
 static void print_usage(const char *progname)
@@ -28,14 +30,16 @@ static void print_usage(const char *progname)
     fprintf(stderr, "  -C: <path>    Map C: drive to host directory\n");
     fprintf(stderr, "  -D: <path>    Map D: drive to host directory (etc. for A-Z)\n");
     fprintf(stderr, "  --jail <path> Legacy: Map C: drive to host directory\n");
+    fprintf(stderr, "  --gui         Enable GUI mode (SDL3 window)\n");
     fprintf(stderr, "\nExamples:\n");
     fprintf(stderr, "  %s -C: ~/winxp ./tests/pe/hello.exe\n", progname);
-    fprintf(stderr, "  %s -C: ~/winxp -D: ./tests/pe ./tests/pe/import_test.exe\n", progname);
+    fprintf(stderr, "  %s --gui -C: ~/winxp -D: ./tests/pe ./tests/pe/import_test.exe\n", progname);
     fprintf(stderr, "\nDLL resolution:\n");
     fprintf(stderr, "  ntdll.dll is automatically loaded from C:\\WINDOWS\\system32\n");
     fprintf(stderr, "\nCurrently supports:\n");
     fprintf(stderr, "  - Static 32-bit PE executables\n");
     fprintf(stderr, "  - Console applications (CUI)\n");
+    fprintf(stderr, "  - GUI applications (with --gui flag)\n");
     fprintf(stderr, "  - DLL imports from ntdll.dll (requires C: drive mapping)\n");
 }
 
@@ -57,10 +61,13 @@ int main(int argc, char *argv[])
     const char *exe_path = NULL;
     char drive_mappings[26][4096] = {{0}};  /* A-Z drive paths */
     int num_drives = 0;
+    bool gui_mode = false;
 
     /* Parse command line options */
     for (int i = 1; i < argc; i++) {
-        if (is_drive_option(argv[i])) {
+        if (strcmp(argv[i], "--gui") == 0) {
+            gui_mode = true;
+        } else if (is_drive_option(argv[i])) {
             /* -C: <path>, -D: <path>, etc. */
             char drive = toupper(argv[i][1]);
             int index = drive - 'A';
@@ -103,7 +110,7 @@ int main(int argc, char *argv[])
 
     /* Initialize memory system */
     printf("Initializing memory (%d MB)...\n", VM_PHYS_MEM_SIZE / (1024 * 1024));
-    mem_size = VM_PHYS_MEM_SIZE;
+    mem_size = VM_PHYS_MEM_SIZE / 1024;  /* mem_size is in KB for 86Box mem.c */
     mem_init();
     mem_reset();
 
@@ -126,6 +133,17 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to initialize VM\n");
         ret = 1;
         goto cleanup;
+    }
+
+    /* Initialize GUI display if requested */
+    vm.gui_mode = gui_mode;
+    if (gui_mode) {
+        printf("Initializing GUI display...\n");
+        if (display_init(&vm.display, DISPLAY_DEFAULT_WIDTH, DISPLAY_DEFAULT_HEIGHT, "WBOX") != 0) {
+            fprintf(stderr, "Failed to initialize display\n");
+            ret = 1;
+            goto cleanup;
+        }
     }
 
     /* Initialize VFS with drive mappings */
@@ -197,15 +215,47 @@ int main(int argc, char *argv[])
     process_init_teb(&vm);
     process_init_peb(&vm);
 
+    /* Initialize heap subsystem */
+    heap_state_t heap;
+    if (heap_init(&heap, &vm) == 0) {
+        vm.heap = &heap;
+
+        /* Set PEB.ProcessHeap to our heap handle */
+        uint32_t peb_phys = paging_get_phys(&vm.paging, vm.peb_addr);
+        if (peb_phys != 0) {
+            /* PEB.ProcessHeap is at offset 0x18 */
+            mem_writel_phys(peb_phys + 0x18, WBOX_PROCESS_HEAP_HANDLE);
+            printf("Set PEB.ProcessHeap to 0x%08X\n", WBOX_PROCESS_HEAP_HANDLE);
+        }
+
+        /* Install heap hooks if ntdll is loaded */
+        if (has_ntdll) {
+            heap_install_hooks(&heap, &vm);
+        }
+    } else {
+        fprintf(stderr, "Warning: Failed to initialize heap\n");
+    }
+
     /* Set up CPU state for Ring 3 entry */
     vm_setup_cpu_state(&vm);
 
     /* Install syscall handler */
     nt_install_syscall_handler();
 
+    /* Initialize loaded DLLs (call DllMain for each) */
+    printf("\nInitializing loaded DLLs...\n");
+    if (vm_init_dlls(&vm) != 0) {
+        fprintf(stderr, "Warning: DLL initialization had issues\n");
+    }
+
     /* Dump initial state */
     printf("\n");
     vm_dump_state(&vm);
+
+    /* Initial display present if in GUI mode */
+    if (gui_mode) {
+        display_present(&vm.display);
+    }
 
     /* Start execution */
     printf("\nStarting execution at 0x%08X...\n", vm.entry_point);
@@ -218,6 +268,9 @@ int main(int argc, char *argv[])
 
 cleanup:
     nt_remove_syscall_handler();
+    if (vm.gui_mode) {
+        display_shutdown(&vm.display);
+    }
     mem_close();
 
     return ret;

@@ -227,9 +227,19 @@ loaded_module_t *module_load_by_name(module_manager_t *mgr, vm_context_t *vm,
         return load_pe_internal(ctx, vm, mgr->ntdll_path, NTDLL_DEFAULT_BASE, false);
     }
 
-    /* For other DLLs, we don't support loading them yet */
-    fprintf(stderr, "module_load_by_name: Cannot load DLL '%s' - not supported\n", dll_name);
-    return NULL;
+    /* For other DLLs, try to find them in the VFS */
+    char dll_path[VFS_MAX_PATH];
+    if (vfs_find_dll(&vm->vfs_jail, dll_name, dll_path) != 0) {
+        fprintf(stderr, "module_load_by_name: Cannot find DLL '%s' in VFS\n", dll_name);
+        return NULL;
+    }
+
+    /* Get loader context from stub manager link */
+    loader_context_t *ctx = (loader_context_t *)((char *)mgr -
+                            offsetof(loader_context_t, modules));
+
+    printf("Loading DLL: %s from %s\n", dll_name, dll_path);
+    return load_pe_internal(ctx, vm, dll_path, 0, false);
 }
 
 /* Implementation of module_load - loads PE from path */
@@ -272,6 +282,23 @@ int loader_load_executable(loader_context_t *ctx, vm_context_t *vm,
     memset(&ctx->import_stats, 0, sizeof(ctx->import_stats));
     if (imports_resolve(&ctx->modules, vm, ctx->main_module, &ctx->import_stats) < 0) {
         fprintf(stderr, "loader: Warning: Some imports failed to resolve\n");
+    }
+
+    /* Resolve imports for all loaded DLLs as well
+     * DLLs like kernel32.dll import from ntdll.dll, etc. */
+    printf("\nResolving imports for dependent DLLs...\n");
+    loaded_module_t *dll = ctx->modules.modules;
+    while (dll) {
+        if (!dll->is_main_exe && dll->pe.data_dirs[IMAGE_DIRECTORY_ENTRY_IMPORT].size > 0) {
+            import_stats_t dll_stats = {0};
+            printf("  Resolving imports for %s\n", dll->name);
+            imports_resolve(&ctx->modules, vm, dll, &dll_stats);
+            ctx->import_stats.total_imports += dll_stats.total_imports;
+            ctx->import_stats.stubbed_imports += dll_stats.stubbed_imports;
+            ctx->import_stats.direct_imports += dll_stats.direct_imports;
+            ctx->import_stats.failed_imports += dll_stats.failed_imports;
+        }
+        dll = dll->next;
     }
 
     /* Create LDR entries for any loaded DLLs */

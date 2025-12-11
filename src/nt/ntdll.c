@@ -4,26 +4,53 @@
  */
 #include "syscalls.h"
 #include "win32k_syscalls.h"
+#include "heap.h"
 #include "../cpu/cpu.h"
 #include "../cpu/mem.h"
 #include "../vm/vm.h"
+#include "../vm/paging.h"
 
 #include <stdio.h>
 
 /*
  * Return from syscall to user mode
- * Sets EAX to return value and jumps back to user code
+ * Sets EAX to return value and returns to user code
+ *
+ * The return address is on the user stack (ESP), placed there by the
+ * CALL [KUSD.SystemCall] instruction that invoked the syscall stub.
+ * We need to pop it and return there.
  */
 static void syscall_return(ntstatus_t status)
 {
     /* Set return value */
     EAX = status;
 
-    /* Read return address from user stack (EDX points to stack) */
-    uint32_t return_addr = readmemll(EDX);
+    /* Read return address from user stack (ESP points to it)
+     * The CALL instruction pushed the return address before the
+     * syscall stub (SYSENTER) was executed */
+    uint32_t return_addr = readmemll(ESP);
+    ESP += 4;  /* Pop the return address */
     cpu_state.pc = return_addr;
 
     /* Segment registers are already set for Ring 3 from VM setup */
+}
+
+/*
+ * Return from stdcall function (cleans up parameters)
+ * Used for hooked functions like RtlAllocateHeap
+ */
+static void stdcall_return(uint32_t result, int num_params)
+{
+    /* Set return value */
+    EAX = result;
+
+    /* Read return address from stack */
+    uint32_t return_addr = readmemll(ESP);
+
+    /* Pop return address + parameters (stdcall convention) */
+    ESP += 4 + (num_params * 4);
+
+    cpu_state.pc = return_addr;
 }
 
 /*
@@ -66,6 +93,227 @@ int nt_syscall_handler(void)
             result = sys_NtTerminateProcess();
             /* NtTerminateProcess exits, no return to user mode */
             return 1;
+
+        case NtQueryPerformanceCounter:
+            result = sys_NtQueryPerformanceCounter();
+            syscall_return(result);
+            return 1;
+
+        case NtAddAtom: {
+            /* NtAddAtom(AtomName, Length, Atom) - stub that returns fake atom */
+            static uint16_t next_atom = 0xC000;  /* Start above reserved atoms */
+            vm_context_t *vm = vm_get_context();
+            if (vm) {
+                /* Read Atom output pointer from stack (3rd param) */
+                uint32_t atom_ptr = readmemll(ESP + 12);
+                if (atom_ptr != 0) {
+                    uint32_t phys = paging_get_phys(&vm->paging, atom_ptr);
+                    if (phys) {
+                        mem_writew_phys(phys, next_atom++);
+                    }
+                }
+            }
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_DLL_INIT_DONE: {
+            /* DLL entry point returned - signal completion */
+            vm_context_t *vm = vm_get_context();
+            if (vm) {
+                vm->dll_init_done = 1;
+            }
+            cpu_exit_requested = 1;  /* Stop execution */
+            return 1;
+        }
+
+        /* Heap function hooks */
+        case WBOX_SYSCALL_HEAP_ALLOC: {
+            /* RtlAllocateHeap(HeapHandle, Flags, Size) - stdcall, 3 params */
+            vm_context_t *vm = vm_get_context();
+            uint32_t heap_handle = readmemll(ESP + 4);
+            uint32_t flags = readmemll(ESP + 8);
+            uint32_t size = readmemll(ESP + 12);
+            uint32_t res = 0;
+            if (vm && vm->heap) {
+                res = heap_alloc(vm->heap, vm, heap_handle, flags, size);
+            }
+            stdcall_return(res, 3);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_HEAP_FREE: {
+            /* RtlFreeHeap(HeapHandle, Flags, Ptr) - stdcall, 3 params */
+            vm_context_t *vm = vm_get_context();
+            uint32_t heap_handle = readmemll(ESP + 4);
+            uint32_t flags = readmemll(ESP + 8);
+            uint32_t ptr = readmemll(ESP + 12);
+            uint32_t res = 0;
+            if (vm && vm->heap) {
+                res = heap_free(vm->heap, vm, heap_handle, flags, ptr) ? 1 : 0;
+            }
+            stdcall_return(res, 3);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_HEAP_REALLOC: {
+            /* RtlReAllocateHeap(HeapHandle, Flags, Ptr, Size) - stdcall, 4 params */
+            vm_context_t *vm = vm_get_context();
+            uint32_t heap_handle = readmemll(ESP + 4);
+            uint32_t flags = readmemll(ESP + 8);
+            uint32_t ptr = readmemll(ESP + 12);
+            uint32_t size = readmemll(ESP + 16);
+            uint32_t res = 0;
+            if (vm && vm->heap) {
+                res = heap_realloc(vm->heap, vm, heap_handle, flags, ptr, size);
+            }
+            stdcall_return(res, 4);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_HEAP_SIZE: {
+            /* RtlSizeHeap(HeapHandle, Flags, Ptr) - stdcall, 3 params */
+            vm_context_t *vm = vm_get_context();
+            uint32_t heap_handle = readmemll(ESP + 4);
+            uint32_t flags = readmemll(ESP + 8);
+            uint32_t ptr = readmemll(ESP + 12);
+            uint32_t res = (uint32_t)-1;
+            if (vm && vm->heap) {
+                res = heap_size(vm->heap, vm, heap_handle, flags, ptr);
+            }
+            stdcall_return(res, 3);
+            return 1;
+        }
+
+        /* String conversion syscalls */
+        case WBOX_SYSCALL_MBSTR_TO_UNICODE: {
+            /* RtlMultiByteToUnicodeN(UnicodeString, UnicodeSize, ResultSize, MbString, MbSize)
+             * stdcall, 5 params */
+            uint32_t unicode_str = readmemll(ESP + 4);   /* OUT PWCHAR */
+            uint32_t unicode_size = readmemll(ESP + 8);  /* IN ULONG */
+            uint32_t result_size_ptr = readmemll(ESP + 12); /* OUT PULONG (optional) */
+            uint32_t mb_str = readmemll(ESP + 16);       /* IN PCSTR */
+            uint32_t mb_size = readmemll(ESP + 20);      /* IN ULONG */
+
+            vm_context_t *vm = vm_get_context();
+            uint32_t chars_written = 0;
+
+            if (vm) {
+                /* Simple ASCII to Unicode conversion */
+                uint32_t max_chars = unicode_size / 2;
+                uint32_t chars_to_convert = mb_size < max_chars ? mb_size : max_chars;
+
+                uint32_t mb_phys = paging_get_phys(&vm->paging, mb_str);
+                uint32_t uni_phys = paging_get_phys(&vm->paging, unicode_str);
+
+                if (mb_phys && uni_phys) {
+                    for (uint32_t i = 0; i < chars_to_convert; i++) {
+                        uint8_t ch = mem_readb_phys(mb_phys + i);
+                        /* Write as 16-bit Unicode (simple ASCII extension) */
+                        mem_writew_phys(uni_phys + i * 2, (uint16_t)ch);
+                        chars_written++;
+                    }
+                }
+
+                /* Write result size if pointer provided */
+                if (result_size_ptr != 0) {
+                    uint32_t result_phys = paging_get_phys(&vm->paging, result_size_ptr);
+                    if (result_phys) {
+                        mem_writel_phys(result_phys, chars_written * 2);
+                    }
+                }
+            }
+
+            stdcall_return(STATUS_SUCCESS, 5);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_UNICODE_TO_MBSTR: {
+            /* RtlUnicodeToMultiByteN(MbString, MbSize, ResultSize, UnicodeString, UnicodeSize)
+             * stdcall, 5 params */
+            uint32_t mb_str = readmemll(ESP + 4);        /* OUT PCHAR */
+            uint32_t mb_size = readmemll(ESP + 8);       /* IN ULONG */
+            uint32_t result_size_ptr = readmemll(ESP + 12); /* OUT PULONG (optional) */
+            uint32_t unicode_str = readmemll(ESP + 16);  /* IN PCWSTR */
+            uint32_t unicode_size = readmemll(ESP + 20); /* IN ULONG (bytes) */
+
+            vm_context_t *vm = vm_get_context();
+            uint32_t bytes_written = 0;
+
+            if (vm) {
+                /* Simple Unicode to ASCII conversion */
+                uint32_t unicode_chars = unicode_size / 2;
+                uint32_t chars_to_convert = unicode_chars < mb_size ? unicode_chars : mb_size;
+
+                uint32_t uni_phys = paging_get_phys(&vm->paging, unicode_str);
+                uint32_t mb_phys = paging_get_phys(&vm->paging, mb_str);
+
+                if (uni_phys && mb_phys) {
+                    for (uint32_t i = 0; i < chars_to_convert; i++) {
+                        uint16_t wch = mem_readw_phys(uni_phys + i * 2);
+                        /* Truncate to ASCII (simple conversion) */
+                        uint8_t ch = (wch < 256) ? (uint8_t)wch : '?';
+                        mem_writeb_phys(mb_phys + i, ch);
+                        bytes_written++;
+                    }
+                }
+
+                /* Write result size if pointer provided */
+                if (result_size_ptr != 0) {
+                    uint32_t result_phys = paging_get_phys(&vm->paging, result_size_ptr);
+                    if (result_phys) {
+                        mem_writel_phys(result_phys, bytes_written);
+                    }
+                }
+            }
+
+            stdcall_return(STATUS_SUCCESS, 5);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_MBSTR_SIZE: {
+            /* RtlMultiByteToUnicodeSize(UnicodeSize, MbString, MbSize)
+             * stdcall, 3 params */
+            uint32_t unicode_size_ptr = readmemll(ESP + 4); /* OUT PULONG */
+            uint32_t mb_str = readmemll(ESP + 8);           /* IN PCSTR (unused) */
+            uint32_t mb_size = readmemll(ESP + 12);         /* IN ULONG */
+
+            (void)mb_str;  /* Unused for simple ASCII conversion */
+
+            vm_context_t *vm = vm_get_context();
+            if (vm && unicode_size_ptr != 0) {
+                /* For ASCII, each byte becomes one 16-bit Unicode char */
+                uint32_t result_phys = paging_get_phys(&vm->paging, unicode_size_ptr);
+                if (result_phys) {
+                    mem_writel_phys(result_phys, mb_size * 2);
+                }
+            }
+
+            stdcall_return(STATUS_SUCCESS, 3);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_UNICODE_SIZE: {
+            /* RtlUnicodeToMultiByteSize(MbSize, UnicodeString, UnicodeSize)
+             * stdcall, 3 params */
+            uint32_t mb_size_ptr = readmemll(ESP + 4);     /* OUT PULONG */
+            uint32_t unicode_str = readmemll(ESP + 8);     /* IN PCWSTR (unused) */
+            uint32_t unicode_size = readmemll(ESP + 12);   /* IN ULONG (bytes) */
+
+            (void)unicode_str;  /* Unused for simple conversion */
+
+            vm_context_t *vm = vm_get_context();
+            if (vm && mb_size_ptr != 0) {
+                /* For simple conversion, each 16-bit char becomes one byte */
+                uint32_t result_phys = paging_get_phys(&vm->paging, mb_size_ptr);
+                if (result_phys) {
+                    mem_writel_phys(result_phys, unicode_size / 2);
+                }
+            }
+
+            stdcall_return(STATUS_SUCCESS, 3);
+            return 1;
+        }
 
         default:
             /* Check if this is a win32k syscall */

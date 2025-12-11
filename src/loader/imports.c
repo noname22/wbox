@@ -80,10 +80,49 @@ uint32_t imports_resolve_function(module_manager_t *mgr, vm_context_t *vm,
         return 0;
     }
 
-    /* Handle forwarders (not implemented yet - would need to recursively resolve) */
+    /* Handle forwarders by recursively resolving */
     if (lookup.is_forwarder) {
-        fprintf(stderr, "Warning: Forwarder '%s' not handled\n", lookup.forwarder);
-        return 0;
+        /* Parse forwarder string: "DLL.Function" or "DLL.#Ordinal" */
+        char fwd_dll[256];
+        char fwd_func[256];
+        const char *dot = strchr(lookup.forwarder, '.');
+        if (!dot) {
+            fprintf(stderr, "Warning: Invalid forwarder format '%s'\n", lookup.forwarder);
+            return 0;
+        }
+
+        size_t dll_len = dot - lookup.forwarder;
+        if (dll_len >= sizeof(fwd_dll)) dll_len = sizeof(fwd_dll) - 1;
+        strncpy(fwd_dll, lookup.forwarder, dll_len);
+        fwd_dll[dll_len] = '\0';
+
+        /* Add .dll extension if not present */
+        if (!strchr(fwd_dll, '.')) {
+            strncat(fwd_dll, ".dll", sizeof(fwd_dll) - strlen(fwd_dll) - 1);
+        }
+
+        strncpy(fwd_func, dot + 1, sizeof(fwd_func) - 1);
+        fwd_func[sizeof(fwd_func) - 1] = '\0';
+
+        /* Find or load target DLL */
+        loaded_module_t *fwd_mod = module_find_by_name(mgr, fwd_dll);
+        if (!fwd_mod) {
+            fwd_mod = module_load_by_name(mgr, vm, fwd_dll);
+            if (!fwd_mod) {
+                fprintf(stderr, "Warning: Cannot load forwarder target DLL '%s'\n", fwd_dll);
+                return 0;
+            }
+        }
+
+        /* Resolve in target DLL */
+        if (fwd_func[0] == '#') {
+            /* Ordinal forwarding: #123 */
+            uint16_t fwd_ord = (uint16_t)atoi(fwd_func + 1);
+            return imports_resolve_function(mgr, vm, stubs, fwd_mod, NULL, fwd_ord, is_stub);
+        } else {
+            /* Named forwarding */
+            return imports_resolve_function(mgr, vm, stubs, fwd_mod, fwd_func, 0, is_stub);
+        }
     }
 
     /* Return VA of function (DLL base + RVA) */

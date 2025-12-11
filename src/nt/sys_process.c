@@ -1,6 +1,6 @@
 /*
  * WBOX NT Process System Calls
- * NtTerminateProcess implementation
+ * NtTerminateProcess, NtQueryPerformanceCounter implementations
  */
 #include "syscalls.h"
 #include "../cpu/cpu.h"
@@ -8,6 +8,7 @@
 #include "../vm/vm.h"
 
 #include <stdio.h>
+#include <time.h>
 
 /*
  * NtTerminateProcess - Terminate a process
@@ -41,4 +42,46 @@ ntstatus_t sys_NtTerminateProcess(void)
 
     /* Other process handles not supported */
     return STATUS_INVALID_HANDLE;
+}
+
+/*
+ * NtQueryPerformanceCounter - Query high-resolution performance counter
+ *
+ * Arguments from user stack (EDX points to stack):
+ *   [EDX+0]  = return address
+ *   [EDX+4]  = PerformanceCounter pointer (receives counter value)
+ *   [EDX+8]  = PerformanceFrequency pointer (optional, receives frequency)
+ *
+ * Returns: STATUS_SUCCESS or error code
+ */
+ntstatus_t sys_NtQueryPerformanceCounter(void)
+{
+    uint32_t args = EDX;
+
+    /* Read arguments from user stack */
+    uint32_t counter_ptr   = readmemll(args + 4);
+    uint32_t frequency_ptr = readmemll(args + 8);
+
+    /* Get current time in nanoseconds using clock_gettime */
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    /* Convert to 100-nanosecond units (Windows format) */
+    uint64_t counter = (uint64_t)ts.tv_sec * 10000000ULL +
+                       (uint64_t)ts.tv_nsec / 100ULL;
+
+    /* Write counter value (LARGE_INTEGER = 64-bit) */
+    if (counter_ptr) {
+        writememll(counter_ptr + 0, (uint32_t)(counter & 0xFFFFFFFF));       /* LowPart */
+        writememll(counter_ptr + 4, (uint32_t)((counter >> 32) & 0xFFFFFFFF)); /* HighPart */
+    }
+
+    /* Write frequency if requested (10 MHz = 100ns units) */
+    if (frequency_ptr) {
+        uint64_t frequency = 10000000ULL;  /* 10 MHz */
+        writememll(frequency_ptr + 0, (uint32_t)(frequency & 0xFFFFFFFF));
+        writememll(frequency_ptr + 4, (uint32_t)((frequency >> 32) & 0xFFFFFFFF));
+    }
+
+    return STATUS_SUCCESS;
 }

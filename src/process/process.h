@@ -35,6 +35,39 @@
 #define PEB_IMAGE_BASE_ADDRESS       0x08  /* ImageBaseAddress */
 #define PEB_LDR                      0x0C  /* Ldr (PEB_LDR_DATA pointer) */
 #define PEB_PROCESS_PARAMETERS       0x10  /* ProcessParameters */
+
+/* RTL_USER_PROCESS_PARAMETERS offsets
+ * Based on ReactOS ntdll structure layout */
+#define RUPP_MAX_LENGTH              0x00
+#define RUPP_LENGTH                  0x04
+#define RUPP_FLAGS                   0x08
+#define RUPP_DEBUG_FLAGS             0x0C
+#define RUPP_CONSOLE_HANDLE          0x10
+#define RUPP_CONSOLE_FLAGS           0x14
+#define RUPP_STDIN_HANDLE            0x18
+#define RUPP_STDOUT_HANDLE           0x1C
+#define RUPP_STDERR_HANDLE           0x20
+/* CurrentDirectory is CURDIR: UNICODE_STRING (8 bytes) + HANDLE (4 bytes) = 12 bytes */
+#define RUPP_CURRENT_DIR             0x24  /* UNICODE_STRING CurrentDirectory.DosPath */
+#define RUPP_CURRENT_DIR_HANDLE      0x2C  /* CurrentDirectory.Handle */
+#define RUPP_DLL_PATH                0x30  /* UNICODE_STRING (8 bytes) */
+#define RUPP_IMAGE_PATH_NAME         0x38  /* UNICODE_STRING (8 bytes) */
+#define RUPP_COMMAND_LINE            0x40  /* UNICODE_STRING (8 bytes) */
+#define RUPP_ENVIRONMENT             0x48  /* Pointer to environment block */
+#define RUPP_STARTING_X              0x4C
+#define RUPP_STARTING_Y              0x50
+#define RUPP_COUNT_X                 0x54
+#define RUPP_COUNT_Y                 0x58
+#define RUPP_COUNT_CHARS_X           0x5C
+#define RUPP_COUNT_CHARS_Y           0x60
+#define RUPP_FILL_ATTRIBUTE          0x64
+#define RUPP_WINDOW_FLAGS            0x68
+#define RUPP_SHOW_WINDOW_FLAGS       0x6C
+#define RUPP_WINDOW_TITLE            0x70  /* UNICODE_STRING (8 bytes) */
+#define RUPP_DESKTOP_INFO            0x78  /* UNICODE_STRING (8 bytes) */
+#define RUPP_SHELL_INFO              0x80  /* UNICODE_STRING (8 bytes) */
+#define RUPP_RUNTIME_DATA            0x88  /* UNICODE_STRING (8 bytes) */
+#define RUPP_SIZE                    0x200 /* Approximate size */
 #define PEB_SUB_SYSTEM_DATA          0x14  /* SubSystemData */
 #define PEB_PROCESS_HEAP             0x18  /* ProcessHeap */
 #define PEB_FAST_PEB_LOCK            0x1C  /* FastPebLock */
@@ -52,6 +85,11 @@
 #define PEB_NUMBER_OF_PROCESSORS     0x64  /* NumberOfProcessors */
 #define PEB_NT_GLOBAL_FLAG           0x68  /* NtGlobalFlag */
 #define PEB_SESSION_ID               0x1D4 /* SessionId */
+/* NLS Code Page Data (for string conversion functions) */
+#define PEB_ANSI_CODE_PAGE_DATA      0x58  /* AnsiCodePageData */
+#define PEB_OEM_CODE_PAGE_DATA       0x5C  /* OemCodePageData */
+#define PEB_UNICODE_CASE_TABLE       0x60  /* UnicodeCaseTableData */
+
 #define PEB_SIZE                     0x1000 /* Minimum PEB size */
 
 /* OS version constants (Windows XP SP3) */

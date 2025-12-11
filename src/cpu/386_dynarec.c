@@ -931,6 +931,22 @@ exec386(int32_t cycs)
 
             fetchdat = fastreadl_fetch(cs + cpu_state.pc);
 
+            /* WBOX: Trace ALL fetches for first N instructions */
+            {
+                static int fetch_trace_count = 0;
+                uint32_t fetch_addr = cs + cpu_state.pc;
+                (void)fetch_addr;  /* Suppress unused warning when tracing disabled */
+                /* Disable verbose tracing for now - we have syscall tracing */
+#if 0
+                if (fetch_trace_count < 100) {
+                    fprintf(stderr, "[FETCH#%d] cs=0x%08X PC=0x%08X addr=0x%08X fetchdat=0x%08X abrt=%d\n",
+                            fetch_trace_count, cs, cpu_state.pc, fetch_addr, fetchdat, cpu_state.abrt);
+                    fetch_trace_count++;
+                }
+#endif
+                (void)fetch_trace_count;
+            }
+
             if (!cpu_state.abrt) {
 #ifdef ENABLE_386_LOG
                 if (in_smm)

@@ -231,13 +231,29 @@ int module_create_ldr_entry(module_manager_t *mgr, vm_context_t *vm,
     /* TlsIndex */
     write_virt_w(vm, entry_va + 0x3A, 0);
 
+    /* HashLinks at offset 0x3C - initialize to point to self (empty list entry) */
+    write_virt_l(vm, entry_va + 0x3C, entry_va + 0x3C);  /* Flink -> self */
+    write_virt_l(vm, entry_va + 0x40, entry_va + 0x3C);  /* Blink -> self */
+
+    /* TimeDateStamp at offset 0x44 - not critical, use 0 */
+    write_virt_l(vm, entry_va + 0x44, 0);
+
+    /* EntryPointActivationContext at offset 0x48 */
+    write_virt_l(vm, entry_va + 0x48, 0);
+
+    /* PatchInformation at offset 0x4C */
+    write_virt_l(vm, entry_va + 0x4C, 0);
+
     /* Link into lists */
     /* InLoadOrderLinks at offset 0x00 */
     list_insert_tail(vm, mgr->ldr_data_va + 0x0C, entry_va + 0x00);
     /* InMemoryOrderLinks at offset 0x08 */
     list_insert_tail(vm, mgr->ldr_data_va + 0x14, entry_va + 0x08);
-    /* InInitializationOrderLinks at offset 0x10 */
-    list_insert_tail(vm, mgr->ldr_data_va + 0x1C, entry_va + 0x10);
+    /* Note: InInitializationOrderLinks (offset 0x10) is NOT populated at load time.
+     * It should only be populated after DllMain has been called successfully.
+     * For now, initialize the list entry to point to itself (unlinked state). */
+    write_virt_l(vm, entry_va + 0x10, entry_va + 0x10);  /* Flink -> self */
+    write_virt_l(vm, entry_va + 0x14, entry_va + 0x10);  /* Blink -> self */
 
     mod->ldr_entry_va = entry_va;
 

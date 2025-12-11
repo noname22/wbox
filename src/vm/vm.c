@@ -450,11 +450,66 @@ void vm_setup_cpu_state(vm_context_t *vm)
     printf("  EIP=0x%08X ESP=0x%08X EFLAGS=0x%08X\n",
            cpu_state.pc, ESP,
            cpu_state.flags | (cpu_state.eflags << 16));
+    printf("  FS.base=0x%08X FS.limit=0x%08X\n",
+           cpu_state.seg_fs.base, cpu_state.seg_fs.limit);
+    /* Verify TEB contents */
+    uint32_t teb_self = readmemll(vm->teb_addr + 0x18);
+    uint32_t teb_tid = readmemll(vm->teb_addr + 0x24);
+    printf("  TEB[0x18] (Self)=0x%08X TEB[0x24] (ThreadId)=0x%08X\n",
+           teb_self, teb_tid);
 }
 
 void vm_start(vm_context_t *vm)
 {
     printf("\n=== Starting VM execution ===\n\n");
+
+    /* Debug: Dump GetCurrentThreadId code if it exists */
+    uint32_t gctid_addr = 0x7C50B920;  /* GetCurrentThreadId */
+    printf("Code at GetCurrentThreadId (0x%08X):\n  ", gctid_addr);
+    for (int i = 0; i < 16; i++) {
+        printf("%02X ", readmembl(gctid_addr + i));
+    }
+    printf("\n");
+
+    /* Debug: Dump the indirect call instruction that crashes */
+    uint32_t crash_addr = 0x7C501240;  /* Location of crash */
+    printf("Code at 0x7C501240 (crash location):\n  ");
+    for (int i = 0; i < 32; i++) {
+        printf("%02X ", readmembl(crash_addr + i));
+        if (i == 15) printf("\n  ");
+    }
+    printf("\n");
+
+    /* Check what address the CALL [mem] at 0x7C4FF8E3 is calling through */
+    /* FF 15 XX XX XX XX = CALL [XXXXXXXX] */
+    uint32_t call_mem_addr = readmemll(0x7C4FF8E5);  /* Address after FF 15 */
+    printf("CALL [0x%08X] - indirect call target address\n", call_mem_addr);
+    uint32_t call_target = readmemll(call_mem_addr);
+    printf("Value at 0x%08X = 0x%08X (the actual function pointer)\n", call_mem_addr, call_target);
+    /* Calculate offset in kernel32.dll */
+    uint32_t k32_base = 0x7C4F0000;
+    printf("Offset in kernel32.dll IAT: 0x%08X\n", call_mem_addr - k32_base);
+
+    /* Debug: Dump IDT entry for page fault (vector 0x0E) */
+    uint32_t idt_pf = vm->idt_phys + 0x0E * 8;
+    printf("IDT entry 0x0E (page fault) at phys 0x%08X:\n  ", idt_pf);
+    for (int i = 0; i < 8; i++) {
+        printf("%02X ", mem_readb_phys(idt_pf + i));
+    }
+    printf("\n");
+
+    /* Debug: Dump IAT entry for GetCurrentThreadId (jmp [0x00410354]) */
+    uint32_t iat_addr = 0x00410354;
+    uint32_t iat_val = readmemll(iat_addr);
+    printf("IAT[0x%08X] = 0x%08X (should be GetCurrentThreadId 0x7C50B920)\n\n", iat_addr, iat_val);
+
+    /* Debug: Dump patched RtlAllocateHeap */
+    uint32_t rtl_alloc_heap = 0x7C824120;
+    printf("Code at RtlAllocateHeap (0x%08X):\n  ", rtl_alloc_heap);
+    for (int i = 0; i < 16; i++) {
+        printf("%02X ", readmembl(rtl_alloc_heap + i));
+    }
+    printf("\n");
 
     /* Debug: Dump first 16 bytes of code at entry point */
     printf("Code at entry point 0x%08X:\n  ", vm->entry_point);
@@ -469,7 +524,22 @@ void vm_start(vm_context_t *vm)
 
     /* Run until exit is requested */
     while (!vm->exit_requested) {
-        exec386(100);
+        /* Execute some CPU cycles */
+        exec386(1000);
+
+        /* Process display events and render if in GUI mode */
+        if (vm->gui_mode && vm->display.initialized) {
+            /* Process SDL events */
+            if (display_poll_events(&vm->display)) {
+                /* Quit requested via SDL (window close, ESC) */
+                vm->exit_requested = 1;
+                vm->exit_code = 0;
+                break;
+            }
+
+            /* Present frame buffer to screen */
+            display_present(&vm->display);
+        }
     }
 
     printf("VM execution stopped (exit code: 0x%08X)\n", vm->exit_code);
@@ -479,6 +549,147 @@ void vm_request_exit(vm_context_t *vm, uint32_t code)
 {
     vm->exit_requested = 1;
     vm->exit_code = code;
+}
+
+int vm_call_dll_entry(vm_context_t *vm, uint32_t entry_point, uint32_t base_va, uint32_t reason)
+{
+    /* Save current CPU state */
+    uint32_t saved_eip = cpu_state.pc;
+    uint32_t saved_esp = ESP;
+    uint32_t saved_eax = EAX;
+    uint32_t saved_ebx = EBX;
+    uint32_t saved_ecx = ECX;
+    uint32_t saved_edx = EDX;
+    uint32_t saved_esi = ESI;
+    uint32_t saved_edi = EDI;
+    uint32_t saved_ebp = EBP;
+
+    /* Reset DLL init done flag */
+    vm->dll_init_done = 0;
+    cpu_exit_requested = 0;
+
+    /* Push arguments for DllMain in stdcall order (right to left)
+     * BOOL WINAPI DllMain(HINSTANCE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+     */
+    ESP -= 4;
+    writememll(ESP, 0);         /* lpReserved = NULL */
+    ESP -= 4;
+    writememll(ESP, reason);    /* ul_reason_for_call */
+    ESP -= 4;
+    writememll(ESP, base_va);   /* hModule = DLL base address */
+
+    /* Push return address (points to DLL init stub) */
+    ESP -= 4;
+    writememll(ESP, vm->dll_init_stub_addr);
+
+    /* Set EIP to entry point */
+    cpu_state.pc = entry_point;
+
+    /* Run until DLL init done */
+    while (!vm->dll_init_done && !vm->exit_requested) {
+        exec386(1000);
+    }
+
+    /* Get return value from EAX (DllMain returns BOOL) */
+    int result = (EAX != 0);
+
+    /* Restore CPU state */
+    cpu_state.pc = saved_eip;
+    ESP = saved_esp;
+    EAX = saved_eax;
+    EBX = saved_ebx;
+    ECX = saved_ecx;
+    EDX = saved_edx;
+    ESI = saved_esi;
+    EDI = saved_edi;
+    EBP = saved_ebp;
+
+    /* Reset flags for normal execution */
+    vm->dll_init_done = 0;
+    vm->exit_requested = 0;
+    cpu_exit_requested = 0;
+
+    return result;
+}
+
+int vm_init_dlls(vm_context_t *vm)
+{
+    if (!vm->loader) {
+        fprintf(stderr, "vm_init_dlls: No loader context\n");
+        return -1;
+    }
+
+    loader_context_t *loader = (loader_context_t *)vm->loader;
+
+    printf("\n=== Initializing DLLs ===\n");
+
+    /* DLLs should be initialized in reverse load order (oldest first).
+     * The module list is newest-at-head (most recently loaded DLLs at front).
+     * A DLL's dependencies are loaded before it, so they appear later in the list.
+     * To initialize dependencies first, we iterate from tail to head. */
+
+    /* Count modules and build array for reverse iteration */
+    int count = 0;
+    loaded_module_t *mod = loader->modules.modules;
+    while (mod) {
+        count++;
+        mod = mod->next;
+    }
+
+    if (count == 0) {
+        printf("  No DLLs to initialize\n");
+        return 0;
+    }
+
+    /* Allocate array */
+    loaded_module_t **modules = malloc(count * sizeof(loaded_module_t *));
+    if (!modules) {
+        fprintf(stderr, "vm_init_dlls: Out of memory\n");
+        return -1;
+    }
+
+    /* Fill array in list order (index 0 = head = newest) */
+    mod = loader->modules.modules;
+    for (int i = 0; i < count; i++) {
+        modules[i] = mod;
+        mod = mod->next;
+    }
+
+    /* Initialize from tail to head (oldest to newest, i.e., dependencies first) */
+    int initialized = 0;
+    for (int i = count - 1; i >= 0; i--) {
+        mod = modules[i];
+
+        /* Skip main executable */
+        if (mod->is_main_exe) {
+            continue;
+        }
+
+        /* Skip DLLs with no entry point (ntdll.dll typically) */
+        if (mod->entry_point == 0 || mod->entry_point == mod->base_va) {
+            printf("  Skipping %s (no entry point)\n", mod->name);
+            continue;
+        }
+
+        printf("  Initializing %s (entry=0x%08X)...", mod->name, mod->entry_point);
+        fflush(stdout);
+
+        int result = vm_call_dll_entry(vm, mod->entry_point, mod->base_va, 1);  /* DLL_PROCESS_ATTACH = 1 */
+
+        if (result) {
+            printf(" OK\n");
+            initialized++;
+        } else {
+            printf(" FAILED (returned FALSE)\n");
+            /* Some DLLs return FALSE but we continue anyway */
+        }
+    }
+
+    free(modules);
+
+    printf("  Initialized %d DLLs\n", initialized);
+
+    return 0;
 }
 
 vm_context_t *vm_get_context(void)
@@ -532,6 +743,25 @@ int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
 
     /* Store loader in VM context */
     vm->loader = loader;
+
+    /* Allocate and map PEB BEFORE loading, so loader can set PEB.Ldr */
+    uint32_t peb_phys = paging_alloc_phys(&vm->paging, PAGE_SIZE);
+    if (peb_phys == 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to allocate PEB\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    if (paging_map_page(&vm->paging, vm->peb_addr, peb_phys,
+                        PTE_USER | PTE_WRITABLE) != 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to map PEB\n");
+        loader_free(loader);
+        free(loader);
+        vm->loader = NULL;
+        return -1;
+    }
+    printf("PEB at 0x%08X (phys 0x%08X)\n", vm->peb_addr, peb_phys);
 
     /* Load executable with DLLs */
     if (loader_load_executable(loader, vm, exe_path) < 0) {
@@ -591,24 +821,56 @@ int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
     }
     printf("TEB at 0x%08X (phys 0x%08X)\n", vm->teb_addr, teb_phys);
 
-    /* Allocate and map PEB */
-    uint32_t peb_phys = paging_alloc_phys(&vm->paging, PAGE_SIZE);
-    if (peb_phys == 0) {
-        fprintf(stderr, "vm_load_pe_with_dlls: Failed to allocate PEB\n");
+    /* PEB was already allocated and mapped before loader_load_executable
+     * so that the loader could set PEB.Ldr */
+
+    /* Allocate and map KUSER_SHARED_DATA at 0x7FFE0000
+     * This is used by ntdll for syscalls via the SystemCall pointer at offset 0x300 */
+    uint32_t kusd_phys = paging_alloc_phys(&vm->paging, PAGE_SIZE);
+    if (kusd_phys == 0) {
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to allocate KUSER_SHARED_DATA\n");
         loader_free(loader);
         free(loader);
         vm->loader = NULL;
         return -1;
     }
-    if (paging_map_page(&vm->paging, vm->peb_addr, peb_phys,
-                        PTE_USER | PTE_WRITABLE) != 0) {
-        fprintf(stderr, "vm_load_pe_with_dlls: Failed to map PEB\n");
+    if (paging_map_page(&vm->paging, VM_KUSD_ADDR, kusd_phys,
+                        PTE_USER) != 0) {  /* Read-only for user mode */
+        fprintf(stderr, "vm_load_pe_with_dlls: Failed to map KUSER_SHARED_DATA\n");
         loader_free(loader);
         free(loader);
         vm->loader = NULL;
         return -1;
     }
-    printf("PEB at 0x%08X (phys 0x%08X)\n", vm->peb_addr, peb_phys);
+
+    /* Create syscall stub at offset 0x340 in KUSD page
+     * This stub executes SYSENTER to enter kernel mode
+     * Code: 0F 34 (SYSENTER), C3 (RET) */
+    uint32_t syscall_stub_va = VM_KUSD_ADDR + 0x340;
+    mem_writeb_phys(kusd_phys + 0x340, 0x0F);  /* SYSENTER opcode byte 1 */
+    mem_writeb_phys(kusd_phys + 0x341, 0x34);  /* SYSENTER opcode byte 2 */
+    mem_writeb_phys(kusd_phys + 0x342, 0xC3);  /* RET */
+
+    /* Set SystemCall pointer at offset 0x300 to point to our stub */
+    mem_writel_phys(kusd_phys + 0x300, syscall_stub_va);
+
+    /* Create DLL init return stub at offset 0x350 in KUSD page
+     * This stub is used as the return address for DllMain calls
+     * Code: B8 FE FF 00 00 (MOV EAX, 0xFFFE), 0F 34 (SYSENTER), CC (INT3 - should never reach) */
+    uint32_t dll_init_stub_va = VM_KUSD_ADDR + 0x350;
+    mem_writeb_phys(kusd_phys + 0x350, 0xB8);  /* MOV EAX, imm32 */
+    mem_writeb_phys(kusd_phys + 0x351, 0xFE);  /* 0x0000FFFE low byte */
+    mem_writeb_phys(kusd_phys + 0x352, 0xFF);
+    mem_writeb_phys(kusd_phys + 0x353, 0x00);
+    mem_writeb_phys(kusd_phys + 0x354, 0x00);
+    mem_writeb_phys(kusd_phys + 0x355, 0x0F);  /* SYSENTER */
+    mem_writeb_phys(kusd_phys + 0x356, 0x34);
+    mem_writeb_phys(kusd_phys + 0x357, 0xCC);  /* INT3 - should never reach */
+    vm->dll_init_stub_addr = dll_init_stub_va;
+
+    printf("KUSER_SHARED_DATA at 0x%08X (phys 0x%08X)\n", VM_KUSD_ADDR, kusd_phys);
+    printf("  SystemCall stub at 0x%08X\n", syscall_stub_va);
+    printf("  DLL init stub at 0x%08X\n", dll_init_stub_va);
 
     return 0;
 }

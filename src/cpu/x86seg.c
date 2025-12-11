@@ -81,6 +81,27 @@ x86seg_log(const char *fmt, ...)
 extern int cpu_block_end;
 #endif
 
+/* Exception type names for debugging */
+static const char *abrt_names[] = {
+    [0x0] = "DE (Divide Error)",
+    [0x1] = "DB (Debug)",
+    [0x2] = "NMI",
+    [0x3] = "BP (Breakpoint)",
+    [0x4] = "OF (Overflow)",
+    [0x5] = "BR (Bound Range)",
+    [0x6] = "UD (Invalid Opcode)",
+    [0x7] = "NM (No FPU)",
+    [0x8] = "DF (Double Fault)",
+    [0x9] = "Coprocessor Segment",
+    [0xA] = "TS (Invalid TSS)",
+    [0xB] = "NP (Segment Not Present)",
+    [0xC] = "SS (Stack Segment Fault)",
+    [0xD] = "GP (General Protection)",
+    [0xE] = "PF (Page Fault)",
+};
+
+static int exception_count = 0;
+
 void
 #ifdef OPS_286_386
 x86_doabrt_2386(int x86_abrt)
@@ -88,6 +109,27 @@ x86_doabrt_2386(int x86_abrt)
 x86_doabrt(int x86_abrt)
 #endif
 {
+    /* WBOX: Trace exception for debugging */
+    exception_count++;
+    const char *name = (x86_abrt < 15 && abrt_names[x86_abrt]) ? abrt_names[x86_abrt] : "Unknown";
+    fprintf(stderr, "\n=== Exception #%d: %s (0x%02X) at CS:EIP=%04X:%08X ===\n",
+            exception_count, name, x86_abrt, CS, cpu_state.oldpc);
+    if (x86_abrt == 0xE) {  /* Page fault */
+        fprintf(stderr, "    CR2 (fault address) = 0x%08X\n", cr2);
+    }
+    fprintf(stderr, "    EAX=%08X EBX=%08X ECX=%08X EDX=%08X\n", EAX, EBX, ECX, EDX);
+    fprintf(stderr, "    ESP=%08X EBP=%08X ESI=%08X EDI=%08X\n", ESP, EBP, ESI, EDI);
+    fprintf(stderr, "    FS.base=%08X\n", cpu_state.seg_fs.base);
+    /* Dump stack - only on first exception to avoid spam */
+    if (exception_count == 1) {
+        fprintf(stderr, "    Stack at ESP:\n");
+        for (int i = 0; i < 8; i++) {
+            uint32_t addr = ESP + i * 4;
+            uint32_t val = readmemll(addr);
+            fprintf(stderr, "      [ESP+%02X] %08X: %08X\n", i * 4, addr, val);
+        }
+    }
+
 #ifndef USE_NEW_DYNAREC
     CS = oldcs;
 #endif
