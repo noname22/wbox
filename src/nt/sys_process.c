@@ -11,20 +11,31 @@
 #include <time.h>
 
 /*
+ * Read syscall argument from user stack.
+ * After SYSENTER, the stack layout is:
+ *   ESP+0  = return address (from syscall stub)
+ *   ESP+4  = return address (from NtXxx function)
+ *   ESP+8  = arg0
+ *   ESP+12 = arg1
+ *   ...
+ */
+static inline uint32_t read_stack_arg(int index)
+{
+    return readmemll(ESP + 8 + (index * 4));
+}
+
+/*
  * NtTerminateProcess - Terminate a process
  *
- * Arguments from user stack (EDX points to stack):
- *   [EDX+0]  = return address
- *   [EDX+4]  = ProcessHandle (NULL or -1 for current process)
- *   [EDX+8]  = ExitStatus
+ * Arguments:
+ *   arg0 = ProcessHandle (NULL or -1 for current process)
+ *   arg1 = ExitStatus
  */
 ntstatus_t sys_NtTerminateProcess(void)
 {
-    uint32_t args = EDX;
-
     /* Read arguments from user stack */
-    uint32_t process_handle = readmemll(args + 4);
-    uint32_t exit_status    = readmemll(args + 8);
+    uint32_t process_handle = read_stack_arg(0);
+    uint32_t exit_status    = read_stack_arg(1);
 
     /* NULL (0) or -1 (0xFFFFFFFF) means current process */
     if (process_handle == 0 || process_handle == 0xFFFFFFFF) {
@@ -47,20 +58,17 @@ ntstatus_t sys_NtTerminateProcess(void)
 /*
  * NtQueryPerformanceCounter - Query high-resolution performance counter
  *
- * Arguments from user stack (EDX points to stack):
- *   [EDX+0]  = return address
- *   [EDX+4]  = PerformanceCounter pointer (receives counter value)
- *   [EDX+8]  = PerformanceFrequency pointer (optional, receives frequency)
+ * Arguments:
+ *   arg0 = PerformanceCounter pointer (receives counter value)
+ *   arg1 = PerformanceFrequency pointer (optional, receives frequency)
  *
  * Returns: STATUS_SUCCESS or error code
  */
 ntstatus_t sys_NtQueryPerformanceCounter(void)
 {
-    uint32_t args = EDX;
-
     /* Read arguments from user stack */
-    uint32_t counter_ptr   = readmemll(args + 4);
-    uint32_t frequency_ptr = readmemll(args + 8);
+    uint32_t counter_ptr   = read_stack_arg(0);
+    uint32_t frequency_ptr = read_stack_arg(1);
 
     /* Get current time in nanoseconds using clock_gettime */
     struct timespec ts;

@@ -12,13 +12,15 @@
 typedef struct vm_context vm_context_t;
 
 /* Heap region in guest address space
- * Located at 0x02000000 to avoid overlap with PE images (typically at 0x00400000+)
+ * Located at 0x10000000 to avoid overlap with:
+ *   - PE images (typically at 0x00400000+)
+ *   - Stack (0x04000000-0x08000000, 64MB grows down)
  */
-#define HEAP_REGION_VA      0x02000000  /* 32MB mark - well past typical PE images */
+#define HEAP_REGION_VA      0x10000000  /* 256MB mark */
 #define HEAP_REGION_SIZE    (16 * 1024 * 1024)  /* 16MB initial heap */
 
 /* Magic heap handle value - should be within the heap region */
-#define WBOX_PROCESS_HEAP_HANDLE  0x02000000
+#define WBOX_PROCESS_HEAP_HANDLE  0x10000000
 
 /* Heap allocation header (stored before each allocation) */
 typedef struct {

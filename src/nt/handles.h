@@ -14,6 +14,11 @@ typedef enum {
     HANDLE_TYPE_CONSOLE_IN,
     HANDLE_TYPE_CONSOLE_OUT,
     HANDLE_TYPE_CONSOLE_ERR,
+    HANDLE_TYPE_EVENT,
+    HANDLE_TYPE_SEMAPHORE,
+    HANDLE_TYPE_MUTEX,
+    HANDLE_TYPE_SECTION,
+    HANDLE_TYPE_KEY,          /* Registry key */
 } handle_type_t;
 
 /* Handle entry */

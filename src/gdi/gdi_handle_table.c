@@ -2,9 +2,34 @@
  * WBOX GDI Handle Table Implementation
  */
 #include "gdi_handle_table.h"
+#include "../process/process.h"  /* For WBOX_PROCESS_ID */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Update shared table entry when a handle is allocated */
+static void update_shared_entry(gdi_handle_table_t *table, int index, uint8_t type, uint16_t reuse)
+{
+    if (table->shared_table == NULL || index >= GDI_MAX_SHARED_HANDLES) {
+        return;
+    }
+    gdi_shared_handle_entry_t *entry = &table->shared_table[index];
+    entry->pKernelAddress = 0;      /* Not used by guest */
+    entry->wProcessId = WBOX_PROCESS_ID;
+    entry->wCount = 1;              /* Reference count */
+    entry->wUpper = reuse & 0x7F;   /* Upper bits of handle */
+    entry->wType = type;            /* Object type */
+    entry->pUserAddress = 0;        /* Not used by guest */
+}
+
+/* Clear shared table entry when a handle is freed */
+static void clear_shared_entry(gdi_handle_table_t *table, int index)
+{
+    if (table->shared_table == NULL || index >= GDI_MAX_SHARED_HANDLES) {
+        return;
+    }
+    memset(&table->shared_table[index], 0, sizeof(gdi_shared_handle_entry_t));
+}
 
 /* Object pool sizes */
 #define DC_POOL_SIZE        64
@@ -319,6 +344,9 @@ uint32_t gdi_alloc_handle(gdi_handle_table_t *table, void *object, uint8_t type)
     }
     table->handle_count++;
 
+    /* Update shared table entry for guest */
+    update_shared_entry(table, index, type, entry->reuse_count);
+
     /* Build handle value */
     return GDI_MAKE_HANDLE(index, type, entry->reuse_count);
 }
@@ -430,6 +458,9 @@ bool gdi_free_handle(gdi_handle_table_t *table, uint32_t handle)
     entry->in_use = false;
     entry->object = NULL;
     table->handle_count--;
+
+    /* Clear shared table entry */
+    clear_shared_entry(table, index);
 
     /* Update free hint */
     if (index < table->next_free) {
@@ -627,5 +658,18 @@ void gdi_free_region(gdi_handle_table_t *table, gdi_region_t *region)
         region->in_use = false;
     } else {
         free(region);
+    }
+}
+
+/* Set guest-mapped shared table pointer */
+void gdi_set_shared_table(gdi_handle_table_t *table, void *host_ptr, uint32_t guest_addr)
+{
+    table->shared_table = (gdi_shared_handle_entry_t *)host_ptr;
+    table->shared_table_guest_addr = guest_addr;
+
+    if (host_ptr) {
+        /* Clear the entire shared table */
+        memset(host_ptr, 0, GDI_SHARED_TABLE_SIZE);
+        printf("GDI: Shared table set at guest 0x%08X (host %p)\n", guest_addr, host_ptr);
     }
 }

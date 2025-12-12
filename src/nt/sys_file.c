@@ -18,34 +18,45 @@
 #include <sys/stat.h>
 
 /*
+ * Read a stack argument (NT syscall convention)
+ * Stack layout at SYSENTER:
+ *   ESP+0:  return address from "call [0x7FFE0300]" (back to syscall stub)
+ *   ESP+4:  return address from "call NtXxx" (back to caller)
+ *   ESP+8:  arg 0
+ *   ESP+12: arg 1
+ *   etc.
+ */
+static inline uint32_t read_stack_arg(int index)
+{
+    return readmemll(ESP + 8 + (index * 4));
+}
+
+/*
  * NtWriteFile - Write data to a file or console
  *
- * Arguments from user stack (EDX points to stack):
- *   [EDX+0]  = return address
- *   [EDX+4]  = FileHandle
- *   [EDX+8]  = Event (ignored for sync I/O)
- *   [EDX+12] = ApcRoutine (ignored)
- *   [EDX+16] = ApcContext (ignored)
- *   [EDX+20] = IoStatusBlock pointer
- *   [EDX+24] = Buffer pointer
- *   [EDX+28] = Length
- *   [EDX+32] = ByteOffset pointer (ignored)
- *   [EDX+36] = Key pointer (ignored)
+ * Arguments (9):
+ *   arg0:  FileHandle
+ *   arg1:  Event (ignored for sync I/O)
+ *   arg2:  ApcRoutine (ignored)
+ *   arg3:  ApcContext (ignored)
+ *   arg4:  IoStatusBlock pointer
+ *   arg5:  Buffer pointer
+ *   arg6:  Length
+ *   arg7:  ByteOffset pointer (ignored)
+ *   arg8:  Key pointer (ignored)
  */
 ntstatus_t sys_NtWriteFile(void)
 {
-    uint32_t args = EDX;
-
     /* Read arguments from user stack */
-    uint32_t file_handle   = readmemll(args + 4);
-    /* uint32_t event      = readmemll(args + 8);  */
-    /* uint32_t apc_routine= readmemll(args + 12); */
-    /* uint32_t apc_context= readmemll(args + 16); */
-    uint32_t io_status_ptr = readmemll(args + 20);
-    uint32_t buffer_ptr    = readmemll(args + 24);
-    uint32_t length        = readmemll(args + 28);
-    /* uint32_t byte_offset= readmemll(args + 32); */
-    /* uint32_t key        = readmemll(args + 36); */
+    uint32_t file_handle   = read_stack_arg(0);
+    /* uint32_t event      = read_stack_arg(1);  */
+    /* uint32_t apc_routine= read_stack_arg(2); */
+    /* uint32_t apc_context= read_stack_arg(3); */
+    uint32_t io_status_ptr = read_stack_arg(4);
+    uint32_t buffer_ptr    = read_stack_arg(5);
+    uint32_t length        = read_stack_arg(6);
+    /* uint32_t byte_offset= read_stack_arg(7); */
+    /* uint32_t key        = read_stack_arg(8); */
 
     /* Get VM context for handle table access */
     vm_context_t *vm = vm_get_context();
@@ -105,13 +116,12 @@ ntstatus_t sys_NtWriteFile(void)
 /*
  * NtClose - Close a handle
  *
- * Arguments:
- *   [EDX+4] = Handle
+ * Arguments (1):
+ *   arg0: Handle
  */
 ntstatus_t sys_NtClose(void)
 {
-    uint32_t args = EDX;
-    uint32_t handle = readmemll(args + 4);
+    uint32_t handle = read_stack_arg(0);
 
     vm_context_t *vm = vm_get_context();
     if (!vm) {
@@ -138,27 +148,24 @@ ntstatus_t sys_NtClose(void)
 /*
  * NtReadFile - Read data from a file
  *
- * Arguments from user stack (EDX points to stack):
- *   [EDX+0]  = return address
- *   [EDX+4]  = FileHandle
- *   [EDX+8]  = Event (ignored for sync I/O)
- *   [EDX+12] = ApcRoutine (ignored)
- *   [EDX+16] = ApcContext (ignored)
- *   [EDX+20] = IoStatusBlock pointer
- *   [EDX+24] = Buffer pointer (output)
- *   [EDX+28] = Length
- *   [EDX+32] = ByteOffset pointer (optional)
- *   [EDX+36] = Key pointer (ignored)
+ * Arguments (9):
+ *   arg0: FileHandle
+ *   arg1: Event (ignored for sync I/O)
+ *   arg2: ApcRoutine (ignored)
+ *   arg3: ApcContext (ignored)
+ *   arg4: IoStatusBlock pointer
+ *   arg5: Buffer pointer (output)
+ *   arg6: Length
+ *   arg7: ByteOffset pointer (optional)
+ *   arg8: Key pointer (ignored)
  */
 ntstatus_t sys_NtReadFile(void)
 {
-    uint32_t args = EDX;
-
-    uint32_t file_handle    = readmemll(args + 4);
-    uint32_t io_status_ptr  = readmemll(args + 20);
-    uint32_t buffer_ptr     = readmemll(args + 24);
-    uint32_t length         = readmemll(args + 28);
-    uint32_t byte_offset_ptr = readmemll(args + 32);
+    uint32_t file_handle     = read_stack_arg(0);
+    uint32_t io_status_ptr   = read_stack_arg(4);
+    uint32_t buffer_ptr      = read_stack_arg(5);
+    uint32_t length          = read_stack_arg(6);
+    uint32_t byte_offset_ptr = read_stack_arg(7);
 
     vm_context_t *vm = vm_get_context();
     if (!vm) {
@@ -260,30 +267,27 @@ static ntstatus_t errno_to_ntstatus(int err, bool must_exist)
 /*
  * NtCreateFile - Create or open a file
  *
- * Arguments from user stack (EDX points to stack):
- *   [EDX+0]  = return address
- *   [EDX+4]  = FileHandle pointer (output)
- *   [EDX+8]  = DesiredAccess
- *   [EDX+12] = ObjectAttributes pointer
- *   [EDX+16] = IoStatusBlock pointer (output)
- *   [EDX+20] = AllocationSize pointer (ignored)
- *   [EDX+24] = FileAttributes (ignored)
- *   [EDX+28] = ShareAccess (ignored)
- *   [EDX+32] = CreateDisposition
- *   [EDX+36] = CreateOptions
- *   [EDX+40] = EaBuffer (ignored)
- *   [EDX+44] = EaLength (ignored)
+ * Arguments (11):
+ *   arg0:  FileHandle pointer (output)
+ *   arg1:  DesiredAccess
+ *   arg2:  ObjectAttributes pointer
+ *   arg3:  IoStatusBlock pointer (output)
+ *   arg4:  AllocationSize pointer (ignored)
+ *   arg5:  FileAttributes (ignored)
+ *   arg6:  ShareAccess (ignored)
+ *   arg7:  CreateDisposition
+ *   arg8:  CreateOptions
+ *   arg9:  EaBuffer (ignored)
+ *   arg10: EaLength (ignored)
  */
 ntstatus_t sys_NtCreateFile(void)
 {
-    uint32_t args = EDX;
-
-    uint32_t file_handle_ptr = readmemll(args + 4);
-    uint32_t desired_access  = readmemll(args + 8);
-    uint32_t obj_attr_ptr    = readmemll(args + 12);
-    uint32_t io_status_ptr   = readmemll(args + 16);
-    uint32_t create_disp     = readmemll(args + 32);
-    uint32_t create_options  = readmemll(args + 36);
+    uint32_t file_handle_ptr = read_stack_arg(0);
+    uint32_t desired_access  = read_stack_arg(1);
+    uint32_t obj_attr_ptr    = read_stack_arg(2);
+    uint32_t io_status_ptr   = read_stack_arg(3);
+    uint32_t create_disp     = read_stack_arg(7);
+    uint32_t create_options  = read_stack_arg(8);
 
     vm_context_t *vm = vm_get_context();
     if (!vm) {
@@ -309,11 +313,12 @@ ntstatus_t sys_NtCreateFile(void)
     }
 
     const char *host_path = vfs_translate_path(&vm->vfs_jail, win_path, path_len);
-    free(win_path);
 
     if (!host_path) {
+        free(win_path);
         return STATUS_OBJECT_PATH_INVALID;
     }
+    free(win_path);
 
     /* Determine open flags from CreateDisposition */
     int flags = 0;
@@ -418,24 +423,21 @@ ntstatus_t sys_NtCreateFile(void)
 /*
  * NtOpenFile - Open an existing file
  *
- * Arguments from user stack (EDX points to stack):
- *   [EDX+0]  = return address
- *   [EDX+4]  = FileHandle pointer (output)
- *   [EDX+8]  = DesiredAccess
- *   [EDX+12] = ObjectAttributes pointer
- *   [EDX+16] = IoStatusBlock pointer (output)
- *   [EDX+20] = ShareAccess (ignored)
- *   [EDX+24] = OpenOptions
+ * Arguments (6):
+ *   arg0: FileHandle pointer (output)
+ *   arg1: DesiredAccess
+ *   arg2: ObjectAttributes pointer
+ *   arg3: IoStatusBlock pointer (output)
+ *   arg4: ShareAccess (ignored)
+ *   arg5: OpenOptions
  */
 ntstatus_t sys_NtOpenFile(void)
 {
-    uint32_t args = EDX;
-
-    uint32_t file_handle_ptr = readmemll(args + 4);
-    uint32_t desired_access  = readmemll(args + 8);
-    uint32_t obj_attr_ptr    = readmemll(args + 12);
-    uint32_t io_status_ptr   = readmemll(args + 16);
-    uint32_t open_options    = readmemll(args + 24);
+    uint32_t file_handle_ptr = read_stack_arg(0);
+    uint32_t desired_access  = read_stack_arg(1);
+    uint32_t obj_attr_ptr    = read_stack_arg(2);
+    uint32_t io_status_ptr   = read_stack_arg(3);
+    uint32_t open_options    = read_stack_arg(5);
 
     vm_context_t *vm = vm_get_context();
     if (!vm) {
@@ -461,11 +463,12 @@ ntstatus_t sys_NtOpenFile(void)
     }
 
     const char *host_path = vfs_translate_path(&vm->vfs_jail, win_path, path_len);
-    free(win_path);
 
     if (!host_path) {
+        free(win_path);
         return STATUS_OBJECT_PATH_INVALID;
     }
+    free(win_path);
 
     /* Determine flags */
     int flags = 0;

@@ -14,21 +14,54 @@
 #include <stdio.h>
 
 /*
+ * Check if PC is in the loader stub region
+ */
+static inline int is_loader_stub_pc(uint32_t pc)
+{
+    return (pc >= 0x7F000000 && pc < 0x7F010000);
+}
+
+/*
+ * Read syscall argument from stack, handling both normal and loader stub calls.
+ *
+ * Normal NT syscalls (through ntdll's NtXxx functions):
+ *   Stack: [ret_syscall_stub] [ret_NtXxx] [arg0] [arg1] ...
+ *   Args start at ESP+8
+ *
+ * Loader stub syscalls:
+ *   Stack: [ret_to_caller] [arg0] [arg1] ...
+ *   Args start at ESP+4
+ */
+static inline uint32_t nt_read_arg(int index)
+{
+    int base_offset = is_loader_stub_pc(cpu_state.pc) ? 4 : 8;
+    return readmemll(ESP + base_offset + (index * 4));
+}
+
+/*
  * Return from syscall to user mode
  * Sets EAX to return value and returns to user code
  *
- * The return address is on the user stack (ESP), placed there by the
- * CALL [KUSD.SystemCall] instruction that invoked the syscall stub.
- * We need to pop it and return there.
+ * For normal NT syscalls (through ntdll's NtXxx functions):
+ *   The return address is on the user stack (ESP), placed there by the
+ *   CALL [KUSD.SystemCall] instruction. We pop it and return there.
+ *
+ * For loader stub syscalls (PC in 0x7F000000-0x7F010000):
+ *   The stub has its own RET N instruction. We just set EAX and let
+ *   execution continue at the RET, which cleans up the stack properly.
  */
 static void syscall_return(ntstatus_t status)
 {
     /* Set return value */
     EAX = status;
 
-    /* Read return address from user stack (ESP points to it)
-     * The CALL instruction pushed the return address before the
-     * syscall stub (SYSENTER) was executed */
+    /* Check if this is a loader stub syscall */
+    if (is_loader_stub_pc(cpu_state.pc)) {
+        /* Don't modify ESP or pc - let the stub's RET N execute */
+        return;
+    }
+
+    /* Normal NT syscall - pop return address and jump there */
     uint32_t return_addr = readmemll(ESP);
     ESP += 4;  /* Pop the return address */
     cpu_state.pc = return_addr;
@@ -44,6 +77,12 @@ static void syscall_return(ntstatus_t status)
 static void win32k_syscall_return(void)
 {
     /* EAX already set by the win32k handler */
+
+    /* Check if this is a loader stub syscall */
+    if (is_loader_stub_pc(cpu_state.pc)) {
+        /* Don't modify ESP or pc - let the stub's RET N execute */
+        return;
+    }
 
     /* Read return address from user stack */
     uint32_t return_addr = readmemll(ESP);
@@ -123,13 +162,76 @@ int nt_syscall_handler(void)
             syscall_return(result);
             return 1;
 
+        case NtCreateEvent: {
+            /* NtCreateEvent(EventHandle, DesiredAccess, ObjectAttributes, EventType, InitialState)
+             * Create a fake event handle - just for basic DLL init compatibility */
+            vm_context_t *vm = vm_get_context();
+            uint32_t event_handle_ptr = nt_read_arg(0);
+            if (vm && event_handle_ptr) {
+                uint32_t handle = handles_add(&vm->handles, HANDLE_TYPE_EVENT, -1);
+                if (handle) {
+                    uint32_t phys = paging_get_phys(&vm->paging, event_handle_ptr);
+                    if (phys) {
+                        mem_writel_phys(phys, handle);
+                    }
+                    syscall_return(STATUS_SUCCESS);
+                    return 1;
+                }
+            }
+            syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+            return 1;
+        }
+
+        case NtQueryDefaultLocale: {
+            /* NtQueryDefaultLocale(UserProfile, DefaultLocaleId)
+             * Return US English locale (LCID 0x0409) */
+            vm_context_t *vm = vm_get_context();
+            uint32_t locale_ptr = nt_read_arg(1);
+            if (vm && locale_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, locale_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, 0x0409);  /* en-US */
+                }
+            }
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtWaitForSingleObject: {
+            /* NtWaitForSingleObject(Handle, Alertable, Timeout)
+             * For basic compatibility, return immediately with success */
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtSetEvent: {
+            /* NtSetEvent(EventHandle, PreviousState)
+             * Set event to signaled state - stub just returns success */
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtOpenKey: {
+            /* NtOpenKey(KeyHandle, DesiredAccess, ObjectAttributes)
+             * Registry not supported - return error to make code use fallbacks */
+            syscall_return(STATUS_OBJECT_NAME_NOT_FOUND);
+            return 1;
+        }
+
+        case NtQueryValueKey: {
+            /* NtQueryValueKey(KeyHandle, ValueName, KeyValueInfoClass, KeyValueInfo, Length, ResultLength)
+             * Registry not supported */
+            syscall_return(STATUS_OBJECT_NAME_NOT_FOUND);
+            return 1;
+        }
+
         case NtAddAtom: {
             /* NtAddAtom(AtomName, Length, Atom) - stub that returns fake atom */
             static uint16_t next_atom = 0xC000;  /* Start above reserved atoms */
             vm_context_t *vm = vm_get_context();
             if (vm) {
                 /* Read Atom output pointer from stack (3rd param) */
-                uint32_t atom_ptr = readmemll(ESP + 12);
+                uint32_t atom_ptr = nt_read_arg(2);
                 if (atom_ptr != 0) {
                     uint32_t phys = paging_get_phys(&vm->paging, atom_ptr);
                     if (phys) {

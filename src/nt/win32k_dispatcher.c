@@ -11,6 +11,7 @@
 #include "../gdi/gdi_drawing.h"
 #include "../gdi/gdi_text.h"
 #include "../user/user_syscalls.h"
+#include "../process/process.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,6 +80,14 @@ int win32k_init(display_context_t *display)
     if (gdi_handle_table_init(&g_gdi_handles) < 0) {
         fprintf(stderr, "win32k: Failed to initialize GDI handle table\n");
         return -1;
+    }
+
+    /* Connect GDI shared table from process initialization */
+    void *shared_table = process_get_gdi_shared_table();
+    if (shared_table) {
+        gdi_set_shared_table(&g_gdi_handles, shared_table, GDI_SHARED_TABLE_ADDR);
+    } else {
+        printf("win32k: Warning - GDI shared table not allocated by process\n");
     }
 
     g_display = display;
@@ -1278,6 +1287,10 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
             return sys_NtUserGetClassInfo();
         case NtUserRegisterClassExWOW - WIN32K_SYSCALL_BASE:
             return sys_NtUserRegisterClassExWOW();
+
+        /* Window management syscalls */
+        case NtUserCreateWindowEx - WIN32K_SYSCALL_BASE:
+            return sys_NtUserCreateWindowEx();
 
         default:
             /* Unknown syscall - log and return success with 0 */

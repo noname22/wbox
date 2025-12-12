@@ -11,12 +11,28 @@
 
 /* Handle table configuration */
 #define GDI_MAX_HANDLES         4096
+#define GDI_MAX_SHARED_HANDLES  65536       /* Shared table has 64K entries */
 #define GDI_HANDLE_INDEX_MASK   0x0000FFFF
 #define GDI_HANDLE_TYPE_SHIFT   16
 #define GDI_HANDLE_TYPE_MASK    0x007F0000
 #define GDI_HANDLE_STOCK_FLAG   0x80000000
 #define GDI_HANDLE_REUSE_SHIFT  24
 #define GDI_HANDLE_REUSE_MASK   0x7F000000
+
+/* Guest-visible shared handle entry (16 bytes, matches Windows/ReactOS) */
+typedef struct gdi_shared_handle_entry {
+    uint32_t pKernelAddress;    /* Kernel-mode object pointer (unused by guest) */
+    uint16_t wProcessId;        /* Owner process ID */
+    uint16_t wCount;            /* Reference count */
+    uint16_t wUpper;            /* Upper 16 bits of handle */
+    uint16_t wType;             /* Object type (GDI_OBJ_*) */
+    uint32_t pUserAddress;      /* User-mode object pointer (unused) */
+} gdi_shared_handle_entry_t;
+
+/* Shared table address in guest memory
+ * Note: Must not conflict with loader region at 0x7F000000-0x7F020000 */
+#define GDI_SHARED_TABLE_ADDR   0x7E000000
+#define GDI_SHARED_TABLE_SIZE   (GDI_MAX_SHARED_HANDLES * sizeof(gdi_shared_handle_entry_t))
 
 /* Stock object indices (used with GetStockObject) */
 #define GDI_STOCK_WHITE_BRUSH       0
@@ -57,6 +73,10 @@ typedef struct gdi_handle_table {
     gdi_handle_entry_t entries[GDI_MAX_HANDLES];
     int next_free;              /* Next free index hint */
     int handle_count;           /* Number of allocated handles */
+
+    /* Guest-mapped shared handle table */
+    gdi_shared_handle_entry_t *shared_table;   /* Host pointer to guest memory */
+    uint32_t shared_table_guest_addr;           /* Guest virtual address */
 
     /* Stock objects storage */
     gdi_brush_t stock_brushes[6];   /* WHITE, LTGRAY, GRAY, DKGRAY, BLACK, NULL */
@@ -116,6 +136,9 @@ bool gdi_handle_is_valid(gdi_handle_table_t *table, uint32_t handle);
 
 /* Get object type from handle */
 uint8_t gdi_handle_get_type(uint32_t handle);
+
+/* Set guest-mapped shared table pointer (called after PEB init) */
+void gdi_set_shared_table(gdi_handle_table_t *table, void *host_ptr, uint32_t guest_addr);
 
 /*
  * Object allocation helpers

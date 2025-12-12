@@ -28,6 +28,13 @@ ntstatus_t sys_NtUserGetClassInfoEx(void);
 ntstatus_t sys_NtUserRegisterClassExWOW(void);
 
 /*
+ * Window management syscalls
+ */
+
+/* NtUserCreateWindowEx - create a window */
+ntstatus_t sys_NtUserCreateWindowEx(void);
+
+/*
  * Helper functions
  */
 

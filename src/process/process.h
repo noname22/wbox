@@ -127,4 +127,10 @@ uint32_t process_get_teb_phys(vm_context_t *vm);
  */
 uint32_t process_get_peb_phys(vm_context_t *vm);
 
+/*
+ * Get host pointer to GDI shared handle table
+ * Returns NULL if not yet allocated
+ */
+void *process_get_gdi_shared_table(void);
+
 #endif /* WBOX_PROCESS_H */

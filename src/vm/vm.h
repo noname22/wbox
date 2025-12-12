@@ -22,12 +22,28 @@ struct heap_state;
 /* Memory layout constants */
 #define VM_PHYS_MEM_SIZE       (256 * 1024 * 1024)  /* 256MB physical memory */
 #define VM_KERNEL_BASE         0x80000000           /* Kernel space starts at 2GB */
-#define VM_USER_STACK_TOP      0x7FFEFFF0           /* Top of user stack */
-#define VM_USER_STACK_SIZE     (64 * 1024)          /* 64KB stack */
+#define VM_USER_STACK_TOP      0x08000000           /* Top of user stack (128MB) */
+#define VM_USER_STACK_SIZE     (64 * 1024 * 1024)   /* 64MB stack (down to 64MB) */
 #define VM_TEB_ADDR            0x7FFDF000           /* Thread Environment Block */
 #define VM_PEB_ADDR            0x7FFDE000           /* Process Environment Block */
 #define VM_KUSD_ADDR           0x7FFE0000           /* KUSER_SHARED_DATA */
 #define VM_DEFAULT_IMAGE_BASE  0x00400000           /* Default PE load address */
+
+/*
+ * Memory layout (low to high):
+ *   0x00400000 - 0x004XXXXX: Executable image
+ *   0x02000000 - 0x04000000: User stack (32MB, grows down from 64MB)
+ *   0x05000000 - 0x06000000: Process heap (16MB)
+ *   0x7XXXXX00 - 0x7DXXXXXX: DLLs (kernel32, ntdll, etc.)
+ *   0x7E000000: GDI shared handle table (1MB)
+ *   0x7F000000: Loader stub region
+ *   0x7F010000: Loader heap
+ *   0x7F020000: USER shared info
+ *   0x7F030000: USER handle table
+ *   0x7FFDE000: PEB
+ *   0x7FFDF000: TEB
+ *   0x7FFE0000: KUSER_SHARED_DATA
+ */
 
 /* GDT selector values */
 #define VM_SEL_NULL            0x00

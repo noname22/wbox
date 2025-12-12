@@ -6,8 +6,13 @@
 #include "../cpu/mem.h"
 #include "../vm/paging.h"
 #include "../nt/handles.h"
+#include "../gdi/gdi_handle_table.h"
 
 #include <stdio.h>
+#include <string.h>
+
+/* Global storage for GDI shared table host pointer */
+static uint8_t *g_gdi_shared_table_host = NULL;
 
 /* Helper: Write 32-bit value to virtual address (uses paging context) */
 static void write_virt_l(vm_context_t *vm, uint32_t virt, uint32_t val)
@@ -102,6 +107,8 @@ void process_init_teb(vm_context_t *vm)
 /* Address for critical sections - after environment */
 #define VM_FAST_PEB_LOCK_ADDR   (VM_PEB_ADDR + 0x800)  /* RTL_CRITICAL_SECTION for FastPebLock */
 #define VM_LOADER_LOCK_ADDR     (VM_PEB_ADDR + 0x820)  /* RTL_CRITICAL_SECTION for LoaderLock */
+/* Address for string buffers (CurrentDirectory, ImagePath, etc.) */
+#define VM_STRING_BUFFERS_ADDR  (VM_PEB_ADDR + 0x900)
 
 /* RTL_CRITICAL_SECTION structure offsets */
 #define CS_DEBUG_INFO           0x00  /* PRTL_CRITICAL_SECTION_DEBUG */
@@ -180,6 +187,53 @@ void process_init_peb(vm_context_t *vm)
     write_virt_l(vm, params + RUPP_STDIN_HANDLE, STD_INPUT_HANDLE);
     write_virt_l(vm, params + RUPP_STDOUT_HANDLE, STD_OUTPUT_HANDLE);
     write_virt_l(vm, params + RUPP_STDERR_HANDLE, STD_ERROR_HANDLE);
+
+    /* Set up string buffers for CurrentDirectory, ImagePath, etc. */
+    uint32_t str_buf = VM_STRING_BUFFERS_ADDR;
+    uint32_t str_offset = 0;
+
+    /* CurrentDirectory.DosPath - "C:\WINDOWS\system32\"
+     * Note: write_virt_wstr returns total bytes INCLUDING null terminator
+     * UNICODE_STRING.Length = bytes without null, MaximumLength = bytes with null */
+    const char *current_dir = "C:\\WINDOWS\\system32\\";
+    uint32_t current_dir_buf = str_buf + str_offset;
+    uint32_t current_dir_bytes = write_virt_wstr(vm, current_dir_buf, current_dir);
+    str_offset += current_dir_bytes;
+
+    /* Set CurrentDirectory UNICODE_STRING in params */
+    write_virt_w(vm, params + RUPP_CURRENT_DIR + 0, (uint16_t)(current_dir_bytes - 2)); /* Length (without null) */
+    write_virt_w(vm, params + RUPP_CURRENT_DIR + 2, (uint16_t)current_dir_bytes);       /* MaxLength (with null) */
+    write_virt_l(vm, params + RUPP_CURRENT_DIR + 4, current_dir_buf);                   /* Buffer */
+    write_virt_l(vm, params + RUPP_CURRENT_DIR_HANDLE, 0);  /* No handle */
+
+    /* DllPath - "C:\WINDOWS\system32" */
+    const char *dll_path = "C:\\WINDOWS\\system32";
+    uint32_t dll_path_buf = str_buf + str_offset;
+    uint32_t dll_path_bytes = write_virt_wstr(vm, dll_path_buf, dll_path);
+    str_offset += dll_path_bytes;
+
+    write_virt_w(vm, params + RUPP_DLL_PATH + 0, (uint16_t)(dll_path_bytes - 2));
+    write_virt_w(vm, params + RUPP_DLL_PATH + 2, (uint16_t)dll_path_bytes);
+    write_virt_l(vm, params + RUPP_DLL_PATH + 4, dll_path_buf);
+
+    /* ImagePathName - use a placeholder path for now */
+    const char *image_path = "C:\\WINDOWS\\system32\\calc.exe";
+    uint32_t image_path_buf = str_buf + str_offset;
+    uint32_t image_path_bytes = write_virt_wstr(vm, image_path_buf, image_path);
+    str_offset += image_path_bytes;
+
+    write_virt_w(vm, params + RUPP_IMAGE_PATH_NAME + 0, (uint16_t)(image_path_bytes - 2));
+    write_virt_w(vm, params + RUPP_IMAGE_PATH_NAME + 2, (uint16_t)image_path_bytes);
+    write_virt_l(vm, params + RUPP_IMAGE_PATH_NAME + 4, image_path_buf);
+
+    /* CommandLine - same as image path for now */
+    uint32_t cmdline_buf = str_buf + str_offset;
+    uint32_t cmdline_bytes = write_virt_wstr(vm, cmdline_buf, image_path);
+    str_offset += cmdline_bytes;
+
+    write_virt_w(vm, params + RUPP_COMMAND_LINE + 0, (uint16_t)(cmdline_bytes - 2));
+    write_virt_w(vm, params + RUPP_COMMAND_LINE + 2, (uint16_t)cmdline_bytes);
+    write_virt_l(vm, params + RUPP_COMMAND_LINE + 4, cmdline_buf);
 
     /* Window position/size - use defaults */
     write_virt_l(vm, params + RUPP_STARTING_X, 0);
@@ -260,6 +314,30 @@ void process_init_peb(vm_context_t *vm)
     printf("  OS Version: %d.%d.%d (Platform %d)\n",
            WBOX_OS_MAJOR_VERSION, WBOX_OS_MINOR_VERSION,
            WBOX_OS_BUILD_NUMBER, WBOX_OS_PLATFORM_ID);
+
+    /* Allocate and map GDI shared handle table */
+    printf("  Allocating GDI shared handle table...\n");
+    uint32_t gdi_shared_phys = paging_alloc_phys(&vm->paging, GDI_SHARED_TABLE_SIZE);
+    if (gdi_shared_phys == 0) {
+        fprintf(stderr, "process_init_peb: Failed to allocate GDI shared table\n");
+        return;
+    }
+
+    /* Map the shared table to guest address space */
+    if (paging_map_range(&vm->paging, GDI_SHARED_TABLE_ADDR, gdi_shared_phys,
+                         GDI_SHARED_TABLE_SIZE, PTE_PRESENT | PTE_WRITABLE | PTE_USER) != 0) {
+        fprintf(stderr, "process_init_peb: Failed to map GDI shared table\n");
+        return;
+    }
+
+    /* Get host pointer and clear the table */
+    g_gdi_shared_table_host = ram + gdi_shared_phys;
+    memset(g_gdi_shared_table_host, 0, GDI_SHARED_TABLE_SIZE);
+
+    /* Set PEB.GdiSharedHandleTable */
+    write_virt_l(vm, peb + PEB_GDI_SHARED_HANDLE_TABLE, GDI_SHARED_TABLE_ADDR);
+    printf("  GdiSharedHandleTable at guest 0x%08X (phys 0x%08X, %u KB)\n",
+           GDI_SHARED_TABLE_ADDR, gdi_shared_phys, GDI_SHARED_TABLE_SIZE / 1024);
 }
 
 uint32_t process_get_teb_phys(vm_context_t *vm)
@@ -270,4 +348,9 @@ uint32_t process_get_teb_phys(vm_context_t *vm)
 uint32_t process_get_peb_phys(vm_context_t *vm)
 {
     return paging_get_phys(&vm->paging, vm->peb_addr);
+}
+
+void *process_get_gdi_shared_table(void)
+{
+    return g_gdi_shared_table_host;
 }

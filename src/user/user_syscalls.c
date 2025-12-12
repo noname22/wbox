@@ -5,6 +5,7 @@
 #include "user_shared.h"
 #include "user_handle_table.h"
 #include "user_class.h"
+#include "user_window.h"
 #include "../nt/syscalls.h"
 #include "../nt/win32k_syscalls.h"
 #include "../vm/vm.h"
@@ -122,6 +123,67 @@ static void read_guest_unicode_string(uint32_t va, wchar_t *buffer, size_t maxle
         }
     }
     buffer[chars] = 0;
+}
+
+/*
+ * LARGE_STRING structure (used by NtUserCreateWindowEx)
+ */
+typedef struct _LARGE_STRING {
+    uint32_t Length;            /* Length in bytes (not including null) */
+    uint32_t MaximumLength;     /* Buffer size */
+    uint32_t bAnsi;             /* Non-zero if ANSI string */
+    uint32_t Buffer;            /* Guest pointer to string data */
+} LARGE_STRING;
+
+/*
+ * Read a LARGE_STRING from guest memory
+ */
+static void read_guest_large_string(uint32_t va, wchar_t *buffer, size_t maxlen)
+{
+    vm_context_t *vm = vm_get_context();
+    if (!vm || !buffer) return;
+
+    buffer[0] = 0;
+
+    if (va == 0) return;
+
+    /* Read LARGE_STRING structure */
+    LARGE_STRING ls;
+    read_guest_mem(va, &ls, sizeof(LARGE_STRING));
+
+    if (ls.Buffer == 0 || ls.Length == 0) return;
+
+    if (ls.bAnsi) {
+        /* ANSI string - convert to wide char */
+        size_t chars = ls.Length;
+        if (chars >= maxlen) chars = maxlen - 1;
+
+        for (size_t i = 0; i < chars; i++) {
+            uint32_t phys = paging_get_phys(&vm->paging, ls.Buffer + i);
+            if (phys) {
+                buffer[i] = (wchar_t)mem_readb_phys(phys);
+            } else {
+                buffer[i] = 0;
+                break;
+            }
+        }
+        buffer[chars] = 0;
+    } else {
+        /* Unicode string */
+        size_t chars = ls.Length / 2;
+        if (chars >= maxlen) chars = maxlen - 1;
+
+        for (size_t i = 0; i < chars; i++) {
+            uint32_t phys = paging_get_phys(&vm->paging, ls.Buffer + i * 2);
+            if (phys) {
+                buffer[i] = mem_readw_phys(phys);
+            } else {
+                buffer[i] = 0;
+                break;
+            }
+        }
+        buffer[chars] = 0;
+    }
 }
 
 /*
@@ -346,6 +408,127 @@ ntstatus_t sys_NtUserGetClassInfoEx(void)
 {
     /* Same as NtUserGetClassInfo for our purposes */
     return sys_NtUserGetClassInfo();
+}
+
+/*
+ * NtUserCreateWindowEx - create a window
+ * Syscall number: 348 (0x15C)
+ *
+ * Parameters:
+ *   arg0:  DWORD dwExStyle           - Extended style
+ *   arg1:  PLARGE_STRING className   - Class name
+ *   arg2:  PLARGE_STRING clsVersion  - Versioned class name (can be NULL)
+ *   arg3:  PLARGE_STRING windowName  - Window title
+ *   arg4:  DWORD dwStyle             - Style
+ *   arg5:  int x                     - X position
+ *   arg6:  int y                     - Y position
+ *   arg7:  int nWidth                - Width
+ *   arg8:  int nHeight               - Height
+ *   arg9:  HWND hWndParent           - Parent window
+ *   arg10: HMENU hMenu               - Menu handle
+ *   arg11: HINSTANCE hInstance       - Instance
+ *   arg12: LPVOID lpParam            - Creation param
+ *   arg13: DWORD dwFlags             - Internal flags
+ *   arg14: PVOID acbiBuffer          - Activation context
+ *
+ * Returns: HWND (in EAX)
+ */
+ntstatus_t sys_NtUserCreateWindowEx(void)
+{
+    uint32_t dwExStyle    = read_stack_arg(0);
+    uint32_t pClassName   = read_stack_arg(1);   /* PLARGE_STRING */
+    uint32_t pClsVersion  = read_stack_arg(2);   /* PLARGE_STRING (unused) */
+    uint32_t pWindowName  = read_stack_arg(3);   /* PLARGE_STRING */
+    uint32_t dwStyle      = read_stack_arg(4);
+    int32_t  x            = (int32_t)read_stack_arg(5);
+    int32_t  y            = (int32_t)read_stack_arg(6);
+    int32_t  nWidth       = (int32_t)read_stack_arg(7);
+    int32_t  nHeight      = (int32_t)read_stack_arg(8);
+    uint32_t hWndParent   = read_stack_arg(9);
+    uint32_t hMenu        = read_stack_arg(10);
+    uint32_t hInstance    = read_stack_arg(11);
+    uint32_t lpParam      = read_stack_arg(12);
+    uint32_t dwFlags      = read_stack_arg(13);
+    uint32_t acbiBuffer   = read_stack_arg(14);
+
+    (void)pClsVersion;
+    (void)dwFlags;
+    (void)acbiBuffer;
+
+    /* Ensure USER initialized */
+    if (user_ensure_init() < 0) {
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* Initialize window subsystem if needed */
+    static bool window_init_done = false;
+    if (!window_init_done) {
+        if (user_window_init() < 0) {
+            fprintf(stderr, "USER: Failed to initialize window subsystem\n");
+            EAX = 0;
+            return STATUS_SUCCESS;
+        }
+        window_init_done = true;
+    }
+
+    /* Read class name */
+    wchar_t className[MAX_CLASSNAME];
+    read_guest_large_string(pClassName, className, MAX_CLASSNAME);
+
+    /* Read window name */
+    wchar_t windowName[256];
+    read_guest_large_string(pWindowName, windowName, 256);
+
+    printf("USER: NtUserCreateWindowEx(class='%ls', title='%ls', style=0x%08X, exStyle=0x%08X)\n",
+           className, windowName, dwStyle, dwExStyle);
+    printf("      pos=(%d,%d) size=(%d,%d) parent=0x%X menu=0x%X\n",
+           x, y, nWidth, nHeight, hWndParent, hMenu);
+
+    /* Find class */
+    WBOX_CLS *cls = user_class_find(className, hInstance);
+    if (!cls) {
+        /* Try with NULL instance (global class) */
+        cls = user_class_find(className, 0);
+    }
+    if (!cls) {
+        fprintf(stderr, "USER: CreateWindowEx - class '%ls' not found\n", className);
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* Get parent window */
+    WBOX_WND *parent = NULL;
+    if (hWndParent != 0) {
+        parent = user_window_from_hwnd(hWndParent);
+    }
+
+    /* Create window */
+    WBOX_WND *wnd = user_window_create(
+        cls,
+        windowName,
+        dwStyle,
+        dwExStyle,
+        x, y, nWidth, nHeight,
+        parent,
+        NULL,   /* owner */
+        hInstance,
+        hMenu,
+        lpParam
+    );
+
+    if (!wnd) {
+        fprintf(stderr, "USER: CreateWindowEx - failed to create window\n");
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* TODO: Send WM_NCCREATE, WM_CREATE messages via guest callback */
+    /* For now, just return the handle */
+
+    printf("USER: Created window hwnd=0x%08X\n", wnd->hwnd);
+    EAX = wnd->hwnd;
+    return STATUS_SUCCESS;
 }
 
 /*
