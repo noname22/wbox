@@ -8,10 +8,12 @@
 #include "../cpu/platform.h"
 #include "../cpu/x86.h"
 #include "../loader/loader.h"
+#include "../thread/scheduler.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* Global VM context pointer for syscall handler access */
 static vm_context_t *g_vm_context = NULL;
@@ -522,10 +524,31 @@ void vm_start(vm_context_t *vm)
     vm->exit_requested = 0;
     cpu_exit_requested = 0;  /* Reset CPU exit flag */
 
+    /* Initialize scheduler if not already done */
+    wbox_scheduler_t *sched = vm->scheduler;
+    if (!sched) {
+        sched = calloc(1, sizeof(wbox_scheduler_t));
+        if (sched && scheduler_init(sched, vm) == 0) {
+            vm->scheduler = sched;
+        } else {
+            free(sched);
+            sched = NULL;
+            fprintf(stderr, "Warning: Failed to initialize scheduler, running without threading\n");
+        }
+    }
+
     /* Run until exit is requested */
     while (!vm->exit_requested) {
-        /* Execute some CPU cycles */
-        exec386(1000);
+        /* Execute some CPU cycles if we have a running thread */
+        if (!sched || (sched->current_thread && !sched->idle)) {
+            exec386(1000);
+
+            /* Scheduler tick for preemption */
+            if (sched) {
+                sched->tick_count++;
+                scheduler_tick(sched);
+            }
+        }
 
         /* Process display events and render if in GUI mode */
         if (vm->gui_mode && vm->display.initialized) {
@@ -539,6 +562,16 @@ void vm_start(vm_context_t *vm)
 
             /* Present frame buffer to screen */
             display_present(&vm->display);
+        }
+
+        /* Check for timeout expiry on waiting threads */
+        if (sched) {
+            scheduler_check_timeouts(sched);
+        }
+
+        /* If idle (no runnable threads), sleep briefly to avoid busy-waiting */
+        if (sched && sched->idle) {
+            usleep(1000);  /* 1ms idle sleep */
         }
     }
 

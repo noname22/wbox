@@ -6,11 +6,15 @@
 #include "win32k_syscalls.h"
 #include "win32k_dispatcher.h"
 #include "heap.h"
+#include "handles.h"
+#include "sync.h"
 #include "../cpu/cpu.h"
 #include "../cpu/mem.h"
 #include "../vm/vm.h"
 #include "../vm/paging.h"
 #include "../user/user_callback.h"
+#include "../thread/thread.h"
+#include "../thread/scheduler.h"
 
 #include <stdio.h>
 
@@ -165,21 +169,50 @@ int nt_syscall_handler(void)
 
         case NtCreateEvent: {
             /* NtCreateEvent(EventHandle, DesiredAccess, ObjectAttributes, EventType, InitialState)
-             * Create a fake event handle - just for basic DLL init compatibility */
+             * EventType: 0 = NotificationEvent (manual-reset), 1 = SynchronizationEvent (auto-reset) */
             vm_context_t *vm = vm_get_context();
             uint32_t event_handle_ptr = nt_read_arg(0);
-            if (vm && event_handle_ptr) {
-                uint32_t handle = handles_add(&vm->handles, HANDLE_TYPE_EVENT, -1);
-                if (handle) {
-                    uint32_t phys = paging_get_phys(&vm->paging, event_handle_ptr);
-                    if (phys) {
-                        mem_writel_phys(phys, handle);
-                    }
-                    syscall_return(STATUS_SUCCESS);
-                    return 1;
-                }
+            uint32_t desired_access = nt_read_arg(1);
+            uint32_t obj_attr_ptr = nt_read_arg(2);
+            uint32_t event_type = nt_read_arg(3);
+            uint32_t initial_state = nt_read_arg(4);
+            (void)desired_access; (void)obj_attr_ptr;
+
+            if (!vm || !event_handle_ptr) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
             }
-            syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+
+            /* Validate event type */
+            if (event_type > 1) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            /* Create event object */
+            wbox_disp_type_t dtype = (event_type == 0) ?
+                WBOX_DISP_EVENT_NOTIFICATION : WBOX_DISP_EVENT_SYNCHRONIZATION;
+            wbox_event_t *event = sync_create_event(dtype, initial_state != 0);
+            if (!event) {
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Add to handle table */
+            uint32_t handle = handles_add_object(&vm->handles, HANDLE_TYPE_EVENT, event);
+            if (!handle) {
+                sync_free_object(event, HANDLE_TYPE_EVENT);
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Write handle to output */
+            uint32_t phys = paging_get_phys(&vm->paging, event_handle_ptr);
+            if (phys) {
+                mem_writel_phys(phys, handle);
+            }
+
+            syscall_return(STATUS_SUCCESS);
             return 1;
         }
 
@@ -199,15 +232,351 @@ int nt_syscall_handler(void)
         }
 
         case NtWaitForSingleObject: {
-            /* NtWaitForSingleObject(Handle, Alertable, Timeout)
-             * For basic compatibility, return immediately with success */
-            syscall_return(STATUS_SUCCESS);
+            /* NtWaitForSingleObject(Handle, Alertable, Timeout) */
+            vm_context_t *vm = vm_get_context();
+            uint32_t handle = nt_read_arg(0);
+            uint32_t alertable = nt_read_arg(1);
+            uint32_t timeout_ptr = nt_read_arg(2);
+
+            if (!vm) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            /* Get object from handle */
+            handle_entry_t *entry = handles_get(&vm->handles, handle);
+            if (!entry) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            /* Check handle type */
+            if (entry->type != HANDLE_TYPE_EVENT &&
+                entry->type != HANDLE_TYPE_SEMAPHORE &&
+                entry->type != HANDLE_TYPE_MUTEX) {
+                syscall_return(STATUS_OBJECT_TYPE_MISMATCH);
+                return 1;
+            }
+
+            wbox_sync_object_t *obj = (wbox_sync_object_t *)entry->object_data;
+            if (!obj) {
+                /* Legacy handle without object data - return success for compatibility */
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            }
+
+            uint32_t current_thread_id = thread_get_current_id();
+
+            /* Check if object is signaled */
+            if (sync_is_signaled(obj, current_thread_id)) {
+                sync_satisfy_wait(obj, current_thread_id);
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            }
+
+            /* Read timeout if provided */
+            int64_t timeout_100ns = 0;
+            bool has_timeout = false;
+            if (timeout_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, timeout_ptr);
+                if (phys) {
+                    timeout_100ns = (int64_t)mem_readl_phys(phys) |
+                                   ((int64_t)mem_readl_phys(phys + 4) << 32);
+                    has_timeout = true;
+                }
+            }
+
+            /* Zero timeout = poll, return TIMEOUT immediately if not signaled */
+            if (has_timeout && timeout_100ns == 0) {
+                syscall_return(STATUS_TIMEOUT);
+                return 1;
+            }
+
+            /* Need to block - use scheduler if available */
+            wbox_scheduler_t *sched = vm->scheduler;
+            if (sched) {
+                /* Calculate absolute timeout */
+                uint64_t abs_timeout = 0;
+                if (has_timeout) {
+                    if (timeout_100ns < 0) {
+                        /* Negative = relative timeout */
+                        abs_timeout = scheduler_get_time_100ns() + (uint64_t)(-timeout_100ns);
+                    } else {
+                        /* Positive = absolute time (from Jan 1, 1601) - convert to our epoch */
+                        abs_timeout = (uint64_t)timeout_100ns;
+                    }
+                }
+
+                void *objects[1] = { obj };
+                int types[1] = { entry->type };
+                uint32_t result = scheduler_block_thread(sched, objects, types, 1,
+                                                        WAIT_TYPE_ANY, abs_timeout,
+                                                        alertable != 0);
+                syscall_return(result);
+                return 1;
+            }
+
+            /* No scheduler - return timeout for non-signaled objects */
+            syscall_return(STATUS_TIMEOUT);
+            return 1;
+        }
+
+        case NtWaitForMultipleObjects: {
+            /* NtWaitForMultipleObjects(Count, Handles, WaitType, Alertable, Timeout)
+             * WaitType: 0 = WaitAll, 1 = WaitAny */
+            vm_context_t *vm = vm_get_context();
+            uint32_t count = nt_read_arg(0);
+            uint32_t handles_ptr = nt_read_arg(1);
+            uint32_t wait_type = nt_read_arg(2);
+            uint32_t alertable = nt_read_arg(3);
+            uint32_t timeout_ptr = nt_read_arg(4);
+
+            if (!vm || count == 0 || count > 64 || !handles_ptr) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            uint32_t current_thread_id = thread_get_current_id();
+            uint32_t handles_phys = paging_get_phys(&vm->paging, handles_ptr);
+            if (!handles_phys) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            /* Read timeout */
+            int64_t timeout_100ns = 0;
+            bool has_timeout = false;
+            if (timeout_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, timeout_ptr);
+                if (phys) {
+                    timeout_100ns = (int64_t)mem_readl_phys(phys) |
+                                   ((int64_t)mem_readl_phys(phys + 4) << 32);
+                    has_timeout = true;
+                }
+            }
+
+            /* Build object array */
+            void *objects[64];
+            int types[64];
+            for (uint32_t i = 0; i < count; i++) {
+                uint32_t h = mem_readl_phys(handles_phys + i * 4);
+                handle_entry_t *entry = handles_get(&vm->handles, h);
+                if (!entry || !entry->object_data) {
+                    objects[i] = NULL;
+                    types[i] = 0;
+                } else {
+                    objects[i] = entry->object_data;
+                    types[i] = entry->type;
+                }
+            }
+
+            /* Check for immediate satisfaction */
+            if (wait_type == 1) {
+                /* WaitAny: check if any object is signaled */
+                for (uint32_t i = 0; i < count; i++) {
+                    if (objects[i] && sync_is_signaled((wbox_sync_object_t *)objects[i], current_thread_id)) {
+                        sync_satisfy_wait((wbox_sync_object_t *)objects[i], current_thread_id);
+                        syscall_return(STATUS_WAIT_0 + i);
+                        return 1;
+                    }
+                }
+            } else {
+                /* WaitAll: check if all objects are signaled */
+                bool all_signaled = true;
+                for (uint32_t i = 0; i < count; i++) {
+                    if (objects[i] && !sync_is_signaled((wbox_sync_object_t *)objects[i], current_thread_id)) {
+                        all_signaled = false;
+                        break;
+                    }
+                }
+                if (all_signaled) {
+                    for (uint32_t i = 0; i < count; i++) {
+                        if (objects[i]) {
+                            sync_satisfy_wait((wbox_sync_object_t *)objects[i], current_thread_id);
+                        }
+                    }
+                    syscall_return(STATUS_WAIT_0);
+                    return 1;
+                }
+            }
+
+            /* Zero timeout = poll */
+            if (has_timeout && timeout_100ns == 0) {
+                syscall_return(STATUS_TIMEOUT);
+                return 1;
+            }
+
+            /* Need to block */
+            wbox_scheduler_t *sched = vm->scheduler;
+            if (sched) {
+                uint64_t abs_timeout = 0;
+                if (has_timeout && timeout_100ns < 0) {
+                    abs_timeout = scheduler_get_time_100ns() + (uint64_t)(-timeout_100ns);
+                } else if (has_timeout) {
+                    abs_timeout = (uint64_t)timeout_100ns;
+                }
+
+                uint32_t result = scheduler_block_thread(sched, objects, types, (int)count,
+                                                        wait_type == 0 ? WAIT_TYPE_ALL : WAIT_TYPE_ANY,
+                                                        abs_timeout, alertable != 0);
+                syscall_return(result);
+                return 1;
+            }
+
+            syscall_return(STATUS_TIMEOUT);
             return 1;
         }
 
         case NtSetEvent: {
-            /* NtSetEvent(EventHandle, PreviousState)
-             * Set event to signaled state - stub just returns success */
+            /* NtSetEvent(EventHandle, PreviousState) */
+            vm_context_t *vm = vm_get_context();
+            uint32_t event_handle = nt_read_arg(0);
+            uint32_t prev_state_ptr = nt_read_arg(1);
+
+            if (!vm) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            handle_entry_t *entry = handles_get(&vm->handles, event_handle);
+            if (!entry || entry->type != HANDLE_TYPE_EVENT) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            wbox_event_t *event = (wbox_event_t *)entry->object_data;
+            if (!event) {
+                /* Legacy handle - just return success */
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            }
+
+            int32_t prev = event->header.signal_state;
+            event->header.signal_state = 1;
+
+            /* Return previous state if requested */
+            if (prev_state_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, prev_state_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, prev);
+                }
+            }
+
+            /* Wake waiting threads */
+            wbox_scheduler_t *sched = vm->scheduler;
+            if (sched) {
+                scheduler_signal_object(sched, event, HANDLE_TYPE_EVENT);
+            }
+
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtResetEvent: {
+            /* NtResetEvent(EventHandle, PreviousState) */
+            vm_context_t *vm = vm_get_context();
+            uint32_t event_handle = nt_read_arg(0);
+            uint32_t prev_state_ptr = nt_read_arg(1);
+
+            if (!vm) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            handle_entry_t *entry = handles_get(&vm->handles, event_handle);
+            if (!entry || entry->type != HANDLE_TYPE_EVENT) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            wbox_event_t *event = (wbox_event_t *)entry->object_data;
+            if (!event) {
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            }
+
+            int32_t prev = event->header.signal_state;
+            event->header.signal_state = 0;
+
+            if (prev_state_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, prev_state_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, prev);
+                }
+            }
+
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtClearEvent: {
+            /* NtClearEvent(EventHandle) - same as NtResetEvent without PreviousState */
+            vm_context_t *vm = vm_get_context();
+            uint32_t event_handle = nt_read_arg(0);
+
+            if (!vm) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            handle_entry_t *entry = handles_get(&vm->handles, event_handle);
+            if (!entry || entry->type != HANDLE_TYPE_EVENT) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            wbox_event_t *event = (wbox_event_t *)entry->object_data;
+            if (event) {
+                event->header.signal_state = 0;
+            }
+
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtPulseEvent: {
+            /* NtPulseEvent(EventHandle, PreviousState)
+             * Momentarily signal event, wake waiters, then reset */
+            vm_context_t *vm = vm_get_context();
+            uint32_t event_handle = nt_read_arg(0);
+            uint32_t prev_state_ptr = nt_read_arg(1);
+
+            if (!vm) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            handle_entry_t *entry = handles_get(&vm->handles, event_handle);
+            if (!entry || entry->type != HANDLE_TYPE_EVENT) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            wbox_event_t *event = (wbox_event_t *)entry->object_data;
+            if (!event) {
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            }
+
+            int32_t prev = event->header.signal_state;
+            event->header.signal_state = 1;
+
+            /* Wake waiting threads */
+            wbox_scheduler_t *sched = vm->scheduler;
+            if (sched) {
+                scheduler_signal_object(sched, event, HANDLE_TYPE_EVENT);
+            }
+
+            /* Reset the event */
+            event->header.signal_state = 0;
+
+            if (prev_state_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, prev_state_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, prev);
+                }
+            }
+
             syscall_return(STATUS_SUCCESS);
             return 1;
         }
@@ -734,19 +1103,295 @@ int nt_syscall_handler(void)
 
         case NtCreateSemaphore: {
             /* NtCreateSemaphore(SemaphoreHandle, DesiredAccess, ObjectAttributes, InitialCount, MaximumCount)
-             * Create a semaphore object - return a fake handle */
-            static uint32_t next_sem_handle = 0x100;
-            uint32_t handle_ptr = nt_read_arg(0);
+             * syscall, 5 params */
+            uint32_t handle_ptr = nt_read_arg(0);      /* OUT PHANDLE */
+            uint32_t desired_access = nt_read_arg(1);  /* IN ACCESS_MASK */
+            uint32_t obj_attrs = nt_read_arg(2);       /* IN POBJECT_ATTRIBUTES (optional) */
+            int32_t initial_count = (int32_t)nt_read_arg(3);  /* IN LONG */
+            int32_t max_count = (int32_t)nt_read_arg(4);      /* IN LONG */
+
+            (void)desired_access;
+            (void)obj_attrs;
+
+            fprintf(stderr, "SYSCALL: NtCreateSemaphore(handle_ptr=0x%X, initial=%d, max=%d)\n",
+                    handle_ptr, initial_count, max_count);
+
+            /* Validate parameters */
+            if (max_count <= 0 || initial_count < 0 || initial_count > max_count) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            /* Create semaphore object */
+            wbox_semaphore_t *sem = sync_create_semaphore(initial_count, max_count);
+            if (!sem) {
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Add to handle table */
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                sync_free_object((wbox_sync_object_t *)sem, HANDLE_TYPE_SEMAPHORE);
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            uint32_t handle = handles_add_object(&vm->handles, HANDLE_TYPE_SEMAPHORE, sem);
+            if (handle == INVALID_HANDLE_VALUE) {
+                sync_free_object((wbox_sync_object_t *)sem, HANDLE_TYPE_SEMAPHORE);
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Write handle to caller */
             if (handle_ptr) {
-                vm_context_t *vm = vm_get_context();
-                if (vm) {
-                    uint32_t phys = paging_get_phys(&vm->paging, handle_ptr);
-                    if (phys) {
-                        mem_writel_phys(phys, next_sem_handle++);
-                    }
+                uint32_t phys = paging_get_phys(&vm->paging, handle_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, handle);
                 }
             }
+
+            fprintf(stderr, "  -> Created semaphore handle 0x%X (initial=%d, max=%d)\n",
+                    handle, initial_count, max_count);
             syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtReleaseSemaphore: {
+            /* NtReleaseSemaphore(SemaphoreHandle, ReleaseCount, PreviousCount)
+             * syscall, 3 params */
+            uint32_t handle = nt_read_arg(0);                /* IN HANDLE */
+            int32_t release_count = (int32_t)nt_read_arg(1); /* IN LONG */
+            uint32_t prev_count_ptr = nt_read_arg(2);        /* OUT PLONG (optional) */
+
+            fprintf(stderr, "SYSCALL: NtReleaseSemaphore(handle=0x%X, count=%d)\n",
+                    handle, release_count);
+
+            if (release_count <= 0) {
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            /* Get semaphore from handle */
+            handle_entry_t *entry = handles_get(&vm->handles, handle);
+            if (!entry || entry->type != HANDLE_TYPE_SEMAPHORE || !entry->object_data) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            wbox_semaphore_t *sem = (wbox_semaphore_t *)entry->object_data;
+            int32_t previous = sem->header.signal_state;
+
+            /* Check for limit overflow */
+            if (sem->header.signal_state + release_count > sem->limit) {
+                syscall_return(STATUS_SEMAPHORE_LIMIT_EXCEEDED);
+                return 1;
+            }
+
+            /* Write previous count if requested */
+            if (prev_count_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, prev_count_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, (uint32_t)previous);
+                }
+            }
+
+            /* Increment semaphore count */
+            sem->header.signal_state += release_count;
+
+            /* Wake waiting threads */
+            wbox_scheduler_t *sched = scheduler_get_instance();
+            if (sched) {
+                scheduler_signal_object(sched, sem, HANDLE_TYPE_SEMAPHORE);
+            }
+
+            fprintf(stderr, "  -> Released, prev=%d, new=%d\n", previous, sem->header.signal_state);
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtCreateMutant: {
+            /* NtCreateMutant(MutantHandle, DesiredAccess, ObjectAttributes, InitialOwner)
+             * syscall, 4 params */
+            uint32_t handle_ptr = nt_read_arg(0);      /* OUT PHANDLE */
+            uint32_t desired_access = nt_read_arg(1);  /* IN ACCESS_MASK */
+            uint32_t obj_attrs = nt_read_arg(2);       /* IN POBJECT_ATTRIBUTES (optional) */
+            uint32_t initial_owner = nt_read_arg(3);   /* IN BOOLEAN */
+
+            (void)desired_access;
+            (void)obj_attrs;
+
+            fprintf(stderr, "SYSCALL: NtCreateMutant(handle_ptr=0x%X, initial_owner=%d)\n",
+                    handle_ptr, initial_owner);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            /* Get current thread ID if initial owner requested */
+            uint32_t owner_id = 0;
+            if (initial_owner) {
+                wbox_scheduler_t *sched = scheduler_get_instance();
+                if (sched && sched->current_thread) {
+                    owner_id = sched->current_thread->thread_id;
+                }
+            }
+
+            /* Create mutant object */
+            wbox_mutant_t *mutant = sync_create_mutant(initial_owner != 0, owner_id);
+            if (!mutant) {
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Add to handle table */
+            uint32_t handle = handles_add_object(&vm->handles, HANDLE_TYPE_MUTANT, mutant);
+            if (handle == INVALID_HANDLE_VALUE) {
+                sync_free_object((wbox_sync_object_t *)mutant, HANDLE_TYPE_MUTANT);
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Write handle to caller */
+            if (handle_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, handle_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, handle);
+                }
+            }
+
+            fprintf(stderr, "  -> Created mutant handle 0x%X (owner=%u)\n", handle, owner_id);
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtReleaseMutant: {
+            /* NtReleaseMutant(MutantHandle, PreviousCount)
+             * syscall, 2 params */
+            uint32_t handle = nt_read_arg(0);           /* IN HANDLE */
+            uint32_t prev_count_ptr = nt_read_arg(1);   /* OUT PLONG (optional) */
+
+            fprintf(stderr, "SYSCALL: NtReleaseMutant(handle=0x%X)\n", handle);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            /* Get mutant from handle */
+            handle_entry_t *entry = handles_get(&vm->handles, handle);
+            if (!entry || entry->type != HANDLE_TYPE_MUTANT || !entry->object_data) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            wbox_mutant_t *mutant = (wbox_mutant_t *)entry->object_data;
+
+            /* Verify current thread owns the mutant */
+            uint32_t current_thread_id = 0;
+            wbox_scheduler_t *sched = scheduler_get_instance();
+            if (sched && sched->current_thread) {
+                current_thread_id = sched->current_thread->thread_id;
+            }
+
+            if (mutant->owner_thread_id != current_thread_id) {
+                syscall_return(STATUS_MUTANT_NOT_OWNED);
+                return 1;
+            }
+
+            /* Get previous state (recursion count, negated for acquired state) */
+            int32_t previous = mutant->recursion_count > 0 ? -(int32_t)mutant->recursion_count : 1;
+
+            /* Write previous count if requested */
+            if (prev_count_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, prev_count_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, (uint32_t)previous);
+                }
+            }
+
+            /* Decrement recursion count */
+            mutant->recursion_count--;
+
+            if (mutant->recursion_count == 0) {
+                /* Release the mutant */
+                mutant->owner_thread_id = 0;
+                mutant->header.signal_state = 1;  /* Now signaled */
+
+                /* Wake waiting threads */
+                if (sched) {
+                    scheduler_signal_object(sched, mutant, HANDLE_TYPE_MUTANT);
+                }
+            }
+
+            fprintf(stderr, "  -> Released, recursion_count=%d\n", mutant->recursion_count);
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtDelayExecution: {
+            /* NtDelayExecution(Alertable, DelayInterval)
+             * syscall, 2 params
+             * DelayInterval is a pointer to LARGE_INTEGER (negative = relative, positive = absolute) */
+            uint32_t alertable = nt_read_arg(0);        /* IN BOOLEAN */
+            uint32_t interval_ptr = nt_read_arg(1);     /* IN PLARGE_INTEGER */
+
+            fprintf(stderr, "SYSCALL: NtDelayExecution(alertable=%d, interval_ptr=0x%X)\n",
+                    alertable, interval_ptr);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            /* Read the delay interval (100ns units) */
+            int64_t delay_100ns = 0;
+            if (interval_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, interval_ptr);
+                if (phys) {
+                    uint32_t lo = mem_readl_phys(phys);
+                    int32_t hi = (int32_t)mem_readl_phys(phys + 4);
+                    delay_100ns = ((int64_t)hi << 32) | lo;
+                }
+            }
+
+            /* Calculate absolute timeout */
+            uint64_t timeout;
+            if (delay_100ns == 0) {
+                /* Zero delay - just yield */
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            } else if (delay_100ns < 0) {
+                /* Negative = relative time */
+                uint64_t now = scheduler_get_time_100ns();
+                timeout = now + (uint64_t)(-delay_100ns);
+            } else {
+                /* Positive = absolute time (we don't support this well, treat as relative) */
+                uint64_t now = scheduler_get_time_100ns();
+                timeout = now + (uint64_t)delay_100ns;
+            }
+
+            /* Block the thread with no objects, just a timeout */
+            wbox_scheduler_t *sched = scheduler_get_instance();
+            if (sched) {
+                uint32_t status = scheduler_block_thread(sched, NULL, NULL, 0,
+                                                         WAIT_TYPE_ANY, timeout, alertable != 0);
+                syscall_return(status);
+            } else {
+                /* No scheduler - just return */
+                syscall_return(STATUS_SUCCESS);
+            }
             return 1;
         }
 
@@ -832,6 +1477,327 @@ int nt_syscall_handler(void)
                     }
                 }
             }
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtCreateThread: {
+            /* NtCreateThread(ThreadHandle, DesiredAccess, ObjectAttributes, ProcessHandle,
+             *                ClientId, ThreadContext, InitialTeb, CreateSuspended)
+             * syscall, 8 params
+             * ThreadContext points to CONTEXT structure with initial register state
+             * InitialTeb points to INITIAL_TEB structure with stack info
+             */
+            uint32_t handle_ptr = nt_read_arg(0);       /* OUT PHANDLE */
+            uint32_t desired_access = nt_read_arg(1);   /* IN ACCESS_MASK */
+            uint32_t obj_attrs = nt_read_arg(2);        /* IN POBJECT_ATTRIBUTES (optional) */
+            uint32_t process_handle = nt_read_arg(3);   /* IN HANDLE */
+            uint32_t client_id_ptr = nt_read_arg(4);    /* OUT PCLIENT_ID */
+            uint32_t context_ptr = nt_read_arg(5);      /* IN PCONTEXT */
+            uint32_t initial_teb_ptr = nt_read_arg(6);  /* IN PINITIAL_TEB */
+            uint32_t create_suspended = nt_read_arg(7); /* IN BOOLEAN */
+
+            (void)desired_access;
+            (void)obj_attrs;
+            (void)process_handle;  /* We only have one process */
+            (void)initial_teb_ptr; /* We allocate our own stack */
+
+            fprintf(stderr, "SYSCALL: NtCreateThread(context=0x%X, suspended=%d)\n",
+                    context_ptr, create_suspended);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            /* Read start address (EIP) and parameter (EAX) from CONTEXT */
+            uint32_t start_address = 0;
+            uint32_t parameter = 0;
+            if (context_ptr) {
+                uint32_t ctx_phys = paging_get_phys(&vm->paging, context_ptr);
+                if (ctx_phys) {
+                    /* CONTEXT offsets (x86):
+                     * +0xB0: Esp
+                     * +0xB4: Ebp
+                     * +0xB8: Eip
+                     * +0xBC: SegCs
+                     * +0xC0: EFlags
+                     * +0xA4: Eax (parameter typically passed in Eax)
+                     */
+                    start_address = mem_readl_phys(ctx_phys + 0xB8);  /* Eip */
+                    parameter = mem_readl_phys(ctx_phys + 0xA4);      /* Eax */
+                }
+            }
+
+            if (start_address == 0) {
+                fprintf(stderr, "  -> ERROR: No start address in context\n");
+                syscall_return(STATUS_INVALID_PARAMETER);
+                return 1;
+            }
+
+            /* Create the thread */
+            wbox_thread_t *thread = thread_create(vm, start_address, parameter, 0,
+                                                  create_suspended != 0);
+            if (!thread) {
+                fprintf(stderr, "  -> ERROR: thread_create failed\n");
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Add to scheduler */
+            wbox_scheduler_t *sched = scheduler_get_instance();
+            if (sched) {
+                scheduler_add_thread(sched, thread);
+            }
+
+            /* Create handle for the thread */
+            uint32_t handle = handles_add_object(&vm->handles, HANDLE_TYPE_THREAD, thread);
+            if (handle == INVALID_HANDLE_VALUE) {
+                /* Thread was already added to scheduler, can't really undo cleanly */
+                syscall_return(STATUS_INSUFFICIENT_RESOURCES);
+                return 1;
+            }
+
+            /* Write handle to caller */
+            if (handle_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, handle_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, handle);
+                }
+            }
+
+            /* Write CLIENT_ID (ProcessId, ThreadId) */
+            if (client_id_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, client_id_ptr);
+                if (phys) {
+                    mem_writel_phys(phys, thread->process_id);      /* UniqueProcess */
+                    mem_writel_phys(phys + 4, thread->thread_id);   /* UniqueThread */
+                }
+            }
+
+            fprintf(stderr, "  -> Created thread %u, handle 0x%X, start=0x%X\n",
+                    thread->thread_id, handle, start_address);
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtTerminateThread: {
+            /* NtTerminateThread(ThreadHandle, ExitStatus)
+             * syscall, 2 params */
+            uint32_t handle = nt_read_arg(0);       /* IN HANDLE (NULL = current thread) */
+            uint32_t exit_status = nt_read_arg(1);  /* IN NTSTATUS */
+
+            fprintf(stderr, "SYSCALL: NtTerminateThread(handle=0x%X, status=0x%X)\n",
+                    handle, exit_status);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            wbox_scheduler_t *sched = scheduler_get_instance();
+            wbox_thread_t *thread = NULL;
+
+            if (handle == 0 || handle == 0xFFFFFFFF) {
+                /* NULL or -1 means current thread */
+                if (sched) {
+                    thread = sched->current_thread;
+                }
+            } else {
+                /* Get thread from handle */
+                handle_entry_t *entry = handles_get(&vm->handles, handle);
+                if (entry && entry->type == HANDLE_TYPE_THREAD) {
+                    thread = (wbox_thread_t *)entry->object_data;
+                }
+            }
+
+            if (!thread) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            /* Terminate the thread */
+            thread_terminate(thread, exit_status);
+
+            /* Remove from scheduler */
+            if (sched) {
+                scheduler_remove_thread(sched, thread);
+
+                /* If we terminated the current thread, need to switch */
+                if (thread == sched->current_thread) {
+                    scheduler_switch(sched);
+                }
+
+                /* If no threads left, request VM exit */
+                if (sched->all_threads == NULL) {
+                    vm_request_exit(vm, exit_status);
+                }
+            }
+
+            fprintf(stderr, "  -> Terminated thread %u\n", thread->thread_id);
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtQueryInformationThread: {
+            /* NtQueryInformationThread(ThreadHandle, InfoClass, Info, Length, ReturnLength)
+             * Return basic thread info */
+            uint32_t handle = nt_read_arg(0);
+            uint32_t info_class = nt_read_arg(1);
+            uint32_t info_ptr = nt_read_arg(2);
+            uint32_t length = nt_read_arg(3);
+            uint32_t ret_len_ptr = nt_read_arg(4);
+
+            fprintf(stderr, "SYSCALL: NtQueryInformationThread(handle=0x%X, class=%d)\n",
+                    handle, info_class);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            wbox_thread_t *thread = NULL;
+            if (handle == 0xFFFFFFFE) {  /* NtCurrentThread() pseudo-handle */
+                wbox_scheduler_t *sched = scheduler_get_instance();
+                if (sched) {
+                    thread = sched->current_thread;
+                }
+            } else {
+                handle_entry_t *entry = handles_get(&vm->handles, handle);
+                if (entry && entry->type == HANDLE_TYPE_THREAD) {
+                    thread = (wbox_thread_t *)entry->object_data;
+                }
+            }
+
+            if (!thread) {
+                /* Return success with empty data for compatibility */
+                if (ret_len_ptr) {
+                    uint32_t phys = paging_get_phys(&vm->paging, ret_len_ptr);
+                    if (phys) mem_writel_phys(phys, 0);
+                }
+                syscall_return(STATUS_SUCCESS);
+                return 1;
+            }
+
+            /* ThreadBasicInformation (class 0) */
+            if (info_class == 0 && info_ptr && length >= 28) {
+                uint32_t phys = paging_get_phys(&vm->paging, info_ptr);
+                if (phys) {
+                    mem_writel_phys(phys + 0, STATUS_SUCCESS);     /* ExitStatus */
+                    mem_writel_phys(phys + 4, thread->teb_addr);   /* TebBaseAddress */
+                    mem_writel_phys(phys + 8, thread->process_id); /* ClientId.UniqueProcess */
+                    mem_writel_phys(phys + 12, thread->thread_id); /* ClientId.UniqueThread */
+                    mem_writel_phys(phys + 16, 0);                 /* AffinityMask */
+                    mem_writel_phys(phys + 20, thread->priority);  /* Priority */
+                    mem_writel_phys(phys + 24, thread->base_priority); /* BasePriority */
+                }
+                if (ret_len_ptr) {
+                    uint32_t rphys = paging_get_phys(&vm->paging, ret_len_ptr);
+                    if (rphys) mem_writel_phys(rphys, 28);
+                }
+            }
+
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtResumeThread: {
+            /* NtResumeThread(ThreadHandle, SuspendCount)
+             * Resume a suspended thread */
+            uint32_t handle = nt_read_arg(0);
+            uint32_t suspend_count_ptr = nt_read_arg(1);
+
+            fprintf(stderr, "SYSCALL: NtResumeThread(handle=0x%X)\n", handle);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            wbox_thread_t *thread = NULL;
+            handle_entry_t *entry = handles_get(&vm->handles, handle);
+            if (entry && entry->type == HANDLE_TYPE_THREAD) {
+                thread = (wbox_thread_t *)entry->object_data;
+            }
+
+            if (!thread) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            /* Return previous suspend count (we don't track this properly, assume 1) */
+            if (suspend_count_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, suspend_count_ptr);
+                if (phys) mem_writel_phys(phys, 1);
+            }
+
+            /* If thread is in INITIALIZED state, make it ready */
+            if (thread->state == THREAD_STATE_INITIALIZED) {
+                thread->state = THREAD_STATE_READY;
+                wbox_scheduler_t *sched = scheduler_get_instance();
+                if (sched) {
+                    scheduler_add_ready(sched, thread);
+                }
+            }
+
+            fprintf(stderr, "  -> Resumed thread %u\n", thread->thread_id);
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtSuspendThread: {
+            /* NtSuspendThread(ThreadHandle, PreviousSuspendCount)
+             * Suspend a thread */
+            uint32_t handle = nt_read_arg(0);
+            uint32_t prev_count_ptr = nt_read_arg(1);
+
+            fprintf(stderr, "SYSCALL: NtSuspendThread(handle=0x%X)\n", handle);
+
+            vm_context_t *vm = vm_get_context();
+            if (!vm) {
+                syscall_return(STATUS_INTERNAL_ERROR);
+                return 1;
+            }
+
+            wbox_thread_t *thread = NULL;
+            handle_entry_t *entry = handles_get(&vm->handles, handle);
+            if (entry && entry->type == HANDLE_TYPE_THREAD) {
+                thread = (wbox_thread_t *)entry->object_data;
+            }
+
+            if (!thread) {
+                syscall_return(STATUS_INVALID_HANDLE);
+                return 1;
+            }
+
+            /* Return previous suspend count (we don't track this properly, assume 0) */
+            if (prev_count_ptr) {
+                uint32_t phys = paging_get_phys(&vm->paging, prev_count_ptr);
+                if (phys) mem_writel_phys(phys, 0);
+            }
+
+            /* Remove from ready queue if ready */
+            wbox_scheduler_t *sched = scheduler_get_instance();
+            if (thread->state == THREAD_STATE_READY && sched) {
+                scheduler_remove_ready(sched, thread);
+            }
+
+            /* Set to initialized (suspended) state */
+            if (thread->state == THREAD_STATE_READY ||
+                thread->state == THREAD_STATE_RUNNING) {
+                thread->state = THREAD_STATE_INITIALIZED;
+            }
+
+            /* If suspending current thread, switch away */
+            if (sched && thread == sched->current_thread) {
+                scheduler_switch(sched);
+            }
+
+            fprintf(stderr, "  -> Suspended thread %u\n", thread->thread_id);
             syscall_return(STATUS_SUCCESS);
             return 1;
         }

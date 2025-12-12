@@ -129,7 +129,10 @@ set(VM_SOURCES
     src/nt/vfs_jail.c
     src/nt/sys_file.c
     src/nt/sys_process.c
+    src/nt/sync.c
     src/nt/win32k_dispatcher.c
+    src/thread/thread.c
+    src/thread/scheduler.c
     src/process/process.c
     src/loader/module.c
     src/loader/exports.c

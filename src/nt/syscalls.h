@@ -332,6 +332,13 @@
 
 /* NTSTATUS values */
 #define STATUS_SUCCESS              0x00000000
+#define STATUS_WAIT_0               0x00000000  /* Wait satisfied by object 0 */
+#define STATUS_WAIT_1               0x00000001  /* Wait satisfied by object 1 */
+#define STATUS_WAIT_2               0x00000002  /* Wait satisfied by object 2 */
+#define STATUS_WAIT_3               0x00000003  /* Wait satisfied by object 3 */
+#define STATUS_ABANDONED_WAIT_0     0x00000080  /* Mutex abandoned by object 0 */
+#define STATUS_TIMEOUT              0x00000102  /* Wait timed out */
+#define STATUS_PENDING              0x00000103  /* Operation is pending */
 #define STATUS_END_OF_FILE          0xC0000011
 #define STATUS_NOT_IMPLEMENTED      0xC0000002
 #define STATUS_INVALID_HANDLE       0xC0000008
@@ -346,9 +353,16 @@
 #define STATUS_OBJECT_NAME_COLLISION 0xC0000035
 #define STATUS_OBJECT_PATH_INVALID   0xC0000039
 #define STATUS_OBJECT_PATH_NOT_FOUND 0xC000003A
+#define STATUS_SEMAPHORE_LIMIT_EXCEEDED 0xC0000045  /* Semaphore count exceeded limit */
+#define STATUS_MUTANT_NOT_OWNED     0xC0000046  /* Release mutant not owned */
 #define STATUS_IO_DEVICE_ERROR      0xC0000185
 #define STATUS_UNSUCCESSFUL         0xC0000001
 #define STATUS_NO_TOKEN             0xC000007C
+#define STATUS_INFO_LENGTH_MISMATCH 0xC0000004
+#define STATUS_INTERNAL_ERROR       0xC00000E5
+
+/* Invalid handle sentinel value */
+#define INVALID_HANDLE_VALUE        ((uint32_t)-1)
 
 /* File operation info values (IO_STATUS_BLOCK.Information) */
 #define FILE_SUPERSEDED    0

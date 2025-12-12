@@ -19,11 +19,16 @@ struct loader_context;
 /* Forward declaration for heap */
 struct heap_state;
 
+/* Forward declaration for scheduler */
+struct wbox_scheduler;
+
 /* Memory layout constants */
 #define VM_PHYS_MEM_SIZE       (256 * 1024 * 1024)  /* 256MB physical memory */
 #define VM_KERNEL_BASE         0x80000000           /* Kernel space starts at 2GB */
 #define VM_USER_STACK_TOP      0x08000000           /* Top of user stack (128MB) */
 #define VM_USER_STACK_SIZE     (64 * 1024 * 1024)   /* 64MB stack (down to 64MB) */
+#define VM_STACK_TOP           VM_USER_STACK_TOP    /* Alias for thread.c */
+#define VM_STACK_BASE          (VM_USER_STACK_TOP - VM_USER_STACK_SIZE)  /* Stack base */
 #define VM_TEB_ADDR            0x7FFDF000           /* Thread Environment Block */
 #define VM_PEB_ADDR            0x7FFDE000           /* Process Environment Block */
 #define VM_KUSD_ADDR           0x7FFE0000           /* KUSER_SHARED_DATA */
@@ -108,6 +113,9 @@ typedef struct vm_context {
     /* Display context (for GUI applications) */
     display_context_t display;
     bool gui_mode;
+
+    /* Thread scheduler (for multi-threading support) */
+    struct wbox_scheduler *scheduler;
 } vm_context_t;
 
 /*
