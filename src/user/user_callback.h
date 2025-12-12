@@ -29,6 +29,9 @@ typedef struct _WBOX_CALLBACK_STATE {
     bool active;
     bool completed;
     uint32_t result;
+
+    /* For kernel callback mechanism: pointer to WINDOWPROC_CALLBACK_ARGUMENTS */
+    uint32_t callback_args_va;
 } WBOX_CALLBACK_STATE;
 
 /* Maximum callback nesting depth */

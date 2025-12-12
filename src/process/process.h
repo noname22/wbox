@@ -23,9 +23,46 @@
 #define TEB_TLS_POINTER         0x2C  /* Thread local storage pointer */
 #define TEB_PEB_POINTER         0x30  /* Pointer to PEB */
 #define TEB_LAST_ERROR          0x34  /* Last error value */
+#define TEB_WIN32_THREAD_INFO   0x40  /* Win32ThreadInfo (set by win32k) */
 #define TEB_TLS_SLOTS           0xE10 /* TLS slots array (64 slots) */
 #define TEB_ACTIVATION_CONTEXT_STACK_PTR 0x1A8 /* ActivationContextStackPointer */
+#define TEB_WIN32_CLIENT_INFO   0x6CC /* Win32ClientInfo[62] - 248 bytes for CLIENTINFO */
 #define TEB_SIZE                0x1000 /* Minimum TEB size */
+
+/*
+ * CLIENTINFO structure offsets (within Win32ClientInfo)
+ * This is overlaid on TEB.Win32ClientInfo (at TEB+0x6CC)
+ */
+#define CI_FLAGS                0x00  /* ULONG_PTR CI_flags */
+#define CI_CSPINS               0x04  /* ULONG_PTR cSpins */
+#define CI_DWEXPWINVER          0x08  /* DWORD dwExpWinVer */
+#define CI_DWCOMPATFLAGS        0x0C  /* DWORD dwCompatFlags */
+#define CI_DWCOMPATFLAGS2       0x10  /* DWORD dwCompatFlags2 */
+#define CI_DWTIFLAGS            0x14  /* DWORD dwTIFlags */
+#define CI_PDESKINFO            0x18  /* PDESKTOPINFO pDeskInfo */
+#define CI_ULCLIENTDELTA        0x1C  /* ULONG_PTR ulClientDelta */
+/* +0x20: phkCurrent, +0x24: fsHooks */
+#define CI_CALLBACKWND          0x28  /* CALLBACKWND structure */
+#define CI_CALLBACKWND_HWND     0x28  /* HWND (4 bytes) */
+#define CI_CALLBACKWND_PWND     0x2C  /* PWND - guest pointer to WND (4 bytes) */
+#define CI_CALLBACKWND_PACTCTX  0x30  /* PVOID pActCtx (4 bytes) */
+
+/* CI_flags bits */
+#define CI_INITTHREAD           0x00000008  /* Thread has been initialized */
+
+/*
+ * DESKTOPINFO structure offsets
+ * Minimal structure for user32 callback support
+ */
+#define DI_PVDESKTOPBASE        0x00  /* PVOID pvDesktopBase */
+#define DI_PVDESKTOPLIMIT       0x04  /* PVOID pvDesktopLimit */
+#define DI_SPWND                0x08  /* WND* spwnd (desktop window) */
+#define DI_FSHOOKS              0x0C  /* DWORD fsHooks */
+/* LIST_ENTRY aphkStart[16] = 16 * 8 = 128 bytes at offset 0x10 */
+#define DI_HTASKMANWINDOW       0x90  /* HWND hTaskManWindow */
+#define DI_HPROGMANWINDOW       0x94  /* HWND hProgmanWindow */
+#define DI_HSHELLWINDOW         0x98  /* HWND hShellWindow */
+#define DI_SIZE                 0xA0  /* Approximate size */
 
 /* ACTIVATION_CONTEXT_STACK structure offsets */
 #define ACTCTX_STACK_ACTIVE_FRAME        0x00  /* ActiveFrame pointer */

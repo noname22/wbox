@@ -3,6 +3,8 @@
  */
 #include "user_class.h"
 #include "user_shared.h"
+#include "guest_cls.h"
+#include "desktop_heap.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -160,6 +162,11 @@ uint16_t user_class_register(WBOX_CLS *cls)
     cls->pclsNext = g_class_list;
     g_class_list = cls;
 
+    /* Create guest CLS in desktop heap if initialized */
+    if (desktop_heap_get()) {
+        cls->guest_cls_va = guest_cls_create(cls);
+    }
+
     printf("USER: Registered class '%ls' (atom 0x%04X, fnid 0x%04X)\n",
            cls->szClassName, cls->atomClassName, cls->fnid);
 
@@ -192,6 +199,11 @@ bool user_class_unregister(const wchar_t *className, uint32_t hInstance)
 
             /* Remove from list */
             *pp = cls->pclsNext;
+
+            /* Destroy guest CLS */
+            if (cls->guest_cls_va) {
+                guest_cls_destroy(cls->guest_cls_va);
+            }
 
             /* Free */
             if (cls->lpszMenuName) free(cls->lpszMenuName);

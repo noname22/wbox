@@ -2,9 +2,14 @@
  * WBOX USER Handle Table Implementation
  */
 #include "user_handle_table.h"
+#include "../cpu/mem.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+/* Guest handle entries address (from user_shared.c) */
+#define GUEST_HANDLE_ENTRIES_VA  0x7F031000
+#define GUEST_HANDLE_ENTRY_SIZE  12
 
 /* Global handle table */
 static USER_HANDLE_TABLE *g_user_handles = NULL;
@@ -295,4 +300,41 @@ void user_handle_table_global_shutdown(void)
         free(g_user_handles);
         g_user_handles = NULL;
     }
+}
+
+void user_handle_set_guest_ptr(uint32_t handle, uint32_t guest_ptr)
+{
+    if (!g_user_handles || handle == 0) {
+        return;
+    }
+
+    int index = USER_HANDLE_INDEX(handle);
+    uint16_t gen = USER_HANDLE_GEN(handle);
+
+    if (index < 0 || index >= USER_MAX_HANDLES) {
+        return;
+    }
+
+    USER_HANDLE_ENTRY *entry = &g_user_handles->entries[index];
+
+    /* Validate this is a valid entry */
+    if (entry->generation != gen || entry->type == USER_TYPE_FREE) {
+        return;
+    }
+
+    /* Calculate guest entry address */
+    uint32_t entry_va = GUEST_HANDLE_ENTRIES_VA + (index * GUEST_HANDLE_ENTRY_SIZE);
+
+    /* Write to guest handle entry:
+     * +0: ptr (guest pointer to object)
+     * +4: pOwner
+     * +8: type (1 byte) + flags (1 byte) + generation (2 bytes)
+     */
+    writememll(entry_va + 0, guest_ptr);
+    writememll(entry_va + 4, 0);  /* pOwner - we don't track this in guest */
+    writememwl(entry_va + 8, (entry->flags << 8) | entry->type);
+    writememwl(entry_va + 10, gen);
+
+    printf("USER: Set guest handle entry index=%d ptr=0x%08X gen=%d\n",
+           index, guest_ptr, gen);
 }

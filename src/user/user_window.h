@@ -159,6 +159,9 @@ typedef struct _WBOX_WND {
 
     /* Creation parameters (saved for WM_CREATE) */
     uint32_t dwExtraParam;              /* lpParam from CreateWindowEx */
+
+    /* Guest WND in desktop heap */
+    uint32_t guest_wnd_va;              /* Guest VA of WND structure */
 } WBOX_WND;
 
 /*

@@ -138,4 +138,11 @@ int user_handle_table_global_init(void);
  */
 void user_handle_table_global_shutdown(void);
 
+/*
+ * Set the guest pointer for a handle entry (for desktop heap)
+ * This updates the guest-visible handle table entry with the guest VA
+ * of the object (e.g., the guest WND for a window handle).
+ */
+void user_handle_set_guest_ptr(uint32_t handle, uint32_t guest_ptr);
+
 #endif /* WBOX_USER_HANDLE_TABLE_H */

@@ -59,6 +59,12 @@ ntstatus_t sys_NtUserPostMessage(void);
 /* NtUserPostQuitMessage - post WM_QUIT */
 ntstatus_t sys_NtUserPostQuitMessage(void);
 
+/* NtUserMessageCall - message passing and default window procedure */
+ntstatus_t sys_NtUserMessageCall(void);
+
+/* NtUserDefSetText - set window text */
+ntstatus_t sys_NtUserDefSetText(void);
+
 /*
  * Focus/activation syscalls
  */
@@ -81,6 +87,56 @@ ntstatus_t sys_NtUserGetKeyState(void);
 
 /* NtUserGetAsyncKeyState - get async key state */
 ntstatus_t sys_NtUserGetAsyncKeyState(void);
+
+/*
+ * Display syscalls
+ */
+
+/* NtUserEnumDisplayDevices - enumerate display devices */
+ntstatus_t sys_NtUserEnumDisplayDevices(void);
+
+/*
+ * Window query syscalls
+ */
+
+/* NtUserGetAncestor - get ancestor window */
+ntstatus_t sys_NtUserGetAncestor(void);
+
+/* NtUserFindWindowEx - find window by class/title */
+ntstatus_t sys_NtUserFindWindowEx(void);
+
+/* NtUserQuerySendMessage - query pending sent message */
+ntstatus_t sys_NtUserQuerySendMessage(void);
+
+/* NtUserCountClipboardFormats - count clipboard formats */
+ntstatus_t sys_NtUserCountClipboardFormats(void);
+
+/* NtUserGetComboBoxInfo - get combobox info */
+ntstatus_t sys_NtUserGetComboBoxInfo(void);
+
+/* NtUserCallHwndLock - misc window operations */
+ntstatus_t sys_NtUserCallHwndLock(void);
+
+/* NtGdiGetTextMetricsW - get text metrics */
+ntstatus_t sys_NtGdiGetTextMetricsW(void);
+
+/* NtUserShowWindowAsync - show window asynchronously */
+ntstatus_t sys_NtUserShowWindowAsync(void);
+
+/* NtUserDeferWindowPos - defer window positioning */
+ntstatus_t sys_NtUserDeferWindowPos(void);
+
+/* NtUserGetWOWClass - get WOW16 class */
+ntstatus_t sys_NtUserGetWOWClass(void);
+
+/* NtUserOpenWindowStation - open window station object */
+ntstatus_t sys_NtUserOpenWindowStation(void);
+
+/* NtUserOpenDesktop - open desktop object */
+ntstatus_t sys_NtUserOpenDesktop(void);
+
+/* NtUserOpenInputDesktop - open input desktop */
+ntstatus_t sys_NtUserOpenInputDesktop(void);
 
 /*
  * Helper functions

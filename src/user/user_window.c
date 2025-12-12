@@ -3,6 +3,8 @@
  */
 #include "user_window.h"
 #include "user_handle_table.h"
+#include "guest_wnd.h"
+#include "desktop_heap.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -95,6 +97,15 @@ static WBOX_WND *window_create_internal(
     /* Add class reference */
     if (pcls) {
         user_class_add_ref(pcls);
+    }
+
+    /* Create guest WND in desktop heap if initialized */
+    if (desktop_heap_get()) {
+        wnd->guest_wnd_va = guest_wnd_create(wnd);
+        /* Update guest handle table entry with guest WND pointer */
+        if (wnd->guest_wnd_va) {
+            user_handle_set_guest_ptr(wnd->hwnd, wnd->guest_wnd_va);
+        }
     }
 
     return wnd;
@@ -229,6 +240,11 @@ void user_window_destroy(WBOX_WND *wnd)
         user_class_release(wnd->pcls);
     }
 
+    /* Destroy guest WND */
+    if (wnd->guest_wnd_va) {
+        guest_wnd_destroy(wnd->guest_wnd_va);
+    }
+
     /* Free resources */
     free(wnd->strName);
     free(wnd->extraBytes);
@@ -275,13 +291,23 @@ void user_window_link_child(WBOX_WND *parent, WBOX_WND *child)
 
     if (parent->spwndChild) {
         parent->spwndChild->spwndPrev = child;
+        /* Update former first child's guest WND prev pointer */
+        guest_wnd_update_hierarchy(parent->spwndChild);
     }
     parent->spwndChild = child;
+
+    /* Update guest WND hierarchy pointers */
+    guest_wnd_update_hierarchy(child);
+    guest_wnd_update_hierarchy(parent);
 }
 
 void user_window_unlink(WBOX_WND *wnd)
 {
     if (!wnd) return;
+
+    WBOX_WND *old_parent = wnd->spwndParent;
+    WBOX_WND *old_prev = wnd->spwndPrev;
+    WBOX_WND *old_next = wnd->spwndNext;
 
     /* Update siblings */
     if (wnd->spwndPrev) {
@@ -300,6 +326,12 @@ void user_window_unlink(WBOX_WND *wnd)
     wnd->spwndParent = NULL;
     wnd->spwndNext = NULL;
     wnd->spwndPrev = NULL;
+
+    /* Update guest WND hierarchy for affected windows */
+    guest_wnd_update_hierarchy(wnd);
+    if (old_prev) guest_wnd_update_hierarchy(old_prev);
+    if (old_next) guest_wnd_update_hierarchy(old_next);
+    if (old_parent) guest_wnd_update_hierarchy(old_parent);
 }
 
 void user_window_set_pos(WBOX_WND *wnd, int x, int y, int cx, int cy, uint32_t flags)

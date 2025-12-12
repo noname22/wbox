@@ -255,8 +255,9 @@ int nt_syscall_handler(void)
         }
 
         case WBOX_SYSCALL_WNDPROC_RETURN: {
-            /* WndProc callback returned - EAX contains the result */
-            user_callback_return(EAX);
+            /* WndProc callback returned - ECX contains the result
+             * (saved by the return stub before loading syscall number into EAX) */
+            user_callback_return(ECX);
             return 1;
         }
 
@@ -728,6 +729,110 @@ int nt_syscall_handler(void)
              * Similar to NtQueryAttributesFile but returns more info.
              * Return STATUS_OBJECT_NAME_NOT_FOUND - caller will handle gracefully. */
             syscall_return(STATUS_OBJECT_NAME_NOT_FOUND);
+            return 1;
+        }
+
+        case NtCreateSemaphore: {
+            /* NtCreateSemaphore(SemaphoreHandle, DesiredAccess, ObjectAttributes, InitialCount, MaximumCount)
+             * Create a semaphore object - return a fake handle */
+            static uint32_t next_sem_handle = 0x100;
+            uint32_t handle_ptr = nt_read_arg(0);
+            if (handle_ptr) {
+                vm_context_t *vm = vm_get_context();
+                if (vm) {
+                    uint32_t phys = paging_get_phys(&vm->paging, handle_ptr);
+                    if (phys) {
+                        mem_writel_phys(phys, next_sem_handle++);
+                    }
+                }
+            }
+            syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtQuerySystemInformation: {
+            /* NtQuerySystemInformation(SystemInformationClass, SystemInformation, Length, ReturnLength)
+             * Return basic info or error depending on class */
+            uint32_t info_class = nt_read_arg(0);
+            uint32_t info_ptr = nt_read_arg(1);
+            uint32_t length = nt_read_arg(2);
+            uint32_t ret_len_ptr = nt_read_arg(3);
+            (void)info_ptr; (void)length;
+
+            /* Write 0 to return length if provided */
+            if (ret_len_ptr) {
+                vm_context_t *vm = vm_get_context();
+                if (vm) {
+                    uint32_t phys = paging_get_phys(&vm->paging, ret_len_ptr);
+                    if (phys) {
+                        mem_writel_phys(phys, 0);
+                    }
+                }
+            }
+
+            /* Return STATUS_INFO_LENGTH_MISMATCH for most queries */
+            (void)info_class;
+            syscall_return(0xC0000004);  /* STATUS_INFO_LENGTH_MISMATCH */
+            return 1;
+        }
+
+        case NtQueryVolumeInformationFile: {
+            /* NtQueryVolumeInformationFile(FileHandle, IoStatusBlock, FsInformation, Length, FsInfoClass)
+             * Return error - volume info not supported */
+            syscall_return(STATUS_NOT_IMPLEMENTED);
+            return 1;
+        }
+
+        case NtCallbackReturn: {
+            /* NtCallbackReturn(Result, ResultLength, Status)
+             * Called by user32 when returning from a kernel callback (e.g. WndProc)
+             * We extract the result and signal the callback as complete */
+            uint32_t result_ptr    = nt_read_arg(0);  /* Pointer to result data */
+            uint32_t result_length = nt_read_arg(1);  /* Size of result data */
+            uint32_t status        = nt_read_arg(2);  /* NTSTATUS */
+
+            fprintf(stderr, "SYSCALL: NtCallbackReturn(result=0x%X, len=%d, status=0x%X)\n",
+                    result_ptr, result_length, status);
+
+            /* The result value is in the WINDOWPROC_CALLBACK_ARGUMENTS.Result field
+             * which user32 filled in before calling NtCallbackReturn.
+             * We read it from result_ptr if provided, otherwise the callback mechanism
+             * should have stored it already.
+             *
+             * For simplicity, get the result from Result field in arguments structure.
+             * result_ptr points to the callback arguments block that was passed to
+             * User32CallWindowProcFromKernel.
+             */
+            uint32_t result_value = 0;
+            if (result_ptr != 0 && result_length >= 32) {
+                /* Result is at offset 28 (WPCB_RESULT) in WINDOWPROC_CALLBACK_ARGUMENTS */
+                result_value = readmemll(result_ptr + 28);
+                fprintf(stderr, "SYSCALL: NtCallbackReturn read result=0x%X from args\n", result_value);
+            }
+
+            /* Mark the callback as completed */
+            user_callback_return(result_value);
+
+            /* Return to caller - but the callback loop will detect completion and restore state */
+            syscall_return(status);
+            return 1;
+        }
+
+        case NtCreateKeyedEvent: {
+            /* NtCreateKeyedEvent(KeyedEventHandle, DesiredAccess, ObjectAttributes, Flags)
+             * Create a keyed event object - return a fake handle */
+            static uint32_t next_keyed_handle = 0x200;
+            uint32_t handle_ptr = nt_read_arg(0);
+            if (handle_ptr) {
+                vm_context_t *vm = vm_get_context();
+                if (vm) {
+                    uint32_t phys = paging_get_phys(&vm->paging, handle_ptr);
+                    if (phys) {
+                        mem_writel_phys(phys, next_keyed_handle++);
+                    }
+                }
+            }
+            syscall_return(STATUS_SUCCESS);
             return 1;
         }
 

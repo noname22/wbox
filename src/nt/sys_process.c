@@ -37,6 +37,9 @@ ntstatus_t sys_NtTerminateProcess(void)
     uint32_t process_handle = read_stack_arg(0);
     uint32_t exit_status    = read_stack_arg(1);
 
+    fprintf(stderr, "SYSCALL: NtTerminateProcess(handle=0x%X, exit_status=0x%X) at PC=0x%08X\n",
+            process_handle, exit_status, cpu_state.pc);
+
     /* NULL (0) or -1 (0xFFFFFFFF) means current process */
     if (process_handle == 0 || process_handle == 0xFFFFFFFF) {
         /* Get VM context and request exit */

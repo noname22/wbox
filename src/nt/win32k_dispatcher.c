@@ -1305,6 +1305,10 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
             return sys_NtUserDispatchMessage();
         case NtUserPostMessage - WIN32K_SYSCALL_BASE:
             return sys_NtUserPostMessage();
+        case NtUserMessageCall - WIN32K_SYSCALL_BASE:
+            return sys_NtUserMessageCall();
+        case NtUserDefSetText - WIN32K_SYSCALL_BASE:
+            return sys_NtUserDefSetText();
 
         /* Focus/activation syscalls */
         case NtUserSetFocus - WIN32K_SYSCALL_BASE:
@@ -1319,6 +1323,42 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
             return sys_NtUserGetKeyState();
         case NtUserGetAsyncKeyState - WIN32K_SYSCALL_BASE:
             return sys_NtUserGetAsyncKeyState();
+
+        /* Display syscalls */
+        case NtUserEnumDisplayDevices - WIN32K_SYSCALL_BASE:
+            return sys_NtUserEnumDisplayDevices();
+
+        /* Window query syscalls */
+        case NtUserGetAncestor - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetAncestor();
+        case NtUserFindWindowEx - WIN32K_SYSCALL_BASE:
+            return sys_NtUserFindWindowEx();
+        case NtUserQuerySendMessage - WIN32K_SYSCALL_BASE:
+            return sys_NtUserQuerySendMessage();
+        case NtUserCountClipboardFormats - WIN32K_SYSCALL_BASE:
+            return sys_NtUserCountClipboardFormats();
+
+        /* Additional stubs */
+        case NtUserGetComboBoxInfo - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetComboBoxInfo();
+        case NtUserCallHwndLock - WIN32K_SYSCALL_BASE:
+            return sys_NtUserCallHwndLock();
+        case NtGdiGetTextMetricsW - WIN32K_SYSCALL_BASE:
+            return sys_NtGdiGetTextMetricsW();
+        case NtUserShowWindowAsync - WIN32K_SYSCALL_BASE:
+            return sys_NtUserShowWindowAsync();
+        case NtUserDeferWindowPos - WIN32K_SYSCALL_BASE:
+            return sys_NtUserDeferWindowPos();
+        case NtUserGetWOWClass - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetWOWClass();
+
+        /* Window station/Desktop syscalls */
+        case NtUserOpenWindowStation - WIN32K_SYSCALL_BASE:
+            return sys_NtUserOpenWindowStation();
+        case NtUserOpenDesktop - WIN32K_SYSCALL_BASE:
+            return sys_NtUserOpenDesktop();
+        case NtUserOpenInputDesktop - WIN32K_SYSCALL_BASE:
+            return sys_NtUserOpenInputDesktop();
 
         default:
             /* Unknown syscall - log and return success with 0 */

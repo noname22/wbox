@@ -118,6 +118,9 @@ typedef struct _WBOX_CLS {
 
     /* Extra bytes */
     uint8_t *extraBytes;            /* Extra class bytes if cbClsExtra > 0 */
+
+    /* Guest CLS in desktop heap */
+    uint32_t guest_cls_va;          /* Guest VA of CLS structure */
 } WBOX_CLS;
 
 /*
