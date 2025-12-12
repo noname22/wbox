@@ -95,9 +95,25 @@ void process_init_teb(vm_context_t *vm)
     /* Last error = 0 (no error) */
     write_virt_l(vm, teb + TEB_LAST_ERROR, 0);
 
+    /* Initialize ActivationContextStack structure at VM_ACTCTX_STACK_ADDR
+     * This is required for RtlFindActivationContextSectionString and other
+     * activation context functions used by user32.dll during initialization.
+     * The structure is placed in the TEB page (after offset 0x800). */
+    uint32_t actctx_stack = VM_ACTCTX_STACK_ADDR;
+    write_virt_l(vm, actctx_stack + ACTCTX_STACK_ACTIVE_FRAME, 0);       /* ActiveFrame = NULL */
+    write_virt_l(vm, actctx_stack + ACTCTX_STACK_FRAME_LIST_CACHE, actctx_stack + ACTCTX_STACK_FRAME_LIST_CACHE);  /* LIST_ENTRY.Flink = self */
+    write_virt_l(vm, actctx_stack + ACTCTX_STACK_FRAME_LIST_CACHE + 4, actctx_stack + ACTCTX_STACK_FRAME_LIST_CACHE);  /* LIST_ENTRY.Blink = self */
+    write_virt_l(vm, actctx_stack + ACTCTX_STACK_FLAGS, 0);              /* Flags = 0 */
+    write_virt_l(vm, actctx_stack + ACTCTX_STACK_NEXT_COOKIE_SEQ, 1);    /* NextCookieSequenceNumber = 1 */
+    write_virt_l(vm, actctx_stack + ACTCTX_STACK_STACK_ID, 1);           /* StackId = 1 */
+
+    /* Set TEB.ActivationContextStackPointer to point to our structure */
+    write_virt_l(vm, teb + TEB_ACTIVATION_CONTEXT_STACK_PTR, actctx_stack);
+
     printf("  StackBase=0x%08X StackLimit=0x%08X\n", vm->stack_top, vm->stack_base);
     printf("  Self=0x%08X PEB=0x%08X\n", teb, vm->peb_addr);
     printf("  ProcessId=%d ThreadId=%d\n", WBOX_PROCESS_ID, WBOX_THREAD_ID);
+    printf("  ActivationContextStack at 0x%08X\n", actctx_stack);
 }
 
 /* Address for RTL_USER_PROCESS_PARAMETERS - in same page as PEB for simplicity */
@@ -107,6 +123,8 @@ void process_init_teb(vm_context_t *vm)
 /* Address for critical sections - after environment */
 #define VM_FAST_PEB_LOCK_ADDR   (VM_PEB_ADDR + 0x800)  /* RTL_CRITICAL_SECTION for FastPebLock */
 #define VM_LOADER_LOCK_ADDR     (VM_PEB_ADDR + 0x820)  /* RTL_CRITICAL_SECTION for LoaderLock */
+/* Address for TlsBitmap RTL_BITMAP structure (8 bytes) */
+#define VM_TLS_BITMAP_ADDR      (VM_PEB_ADDR + 0x840)
 /* Address for string buffers (CurrentDirectory, ImagePath, etc.) */
 #define VM_STRING_BUFFERS_ADDR  (VM_PEB_ADDR + 0x900)
 
@@ -309,6 +327,26 @@ void process_init_peb(vm_context_t *vm)
     init_critical_section(vm, VM_LOADER_LOCK_ADDR);
     write_virt_l(vm, peb + PEB_LOADER_LOCK, VM_LOADER_LOCK_ADDR);
     printf("  LoaderLock at 0x%08X\n", VM_LOADER_LOCK_ADDR);
+
+    /* Initialize TlsBitmap
+     * TlsAlloc uses RtlFindClearBitsAndSet on PEB->TlsBitmap to allocate slots.
+     * We need to set up an RTL_BITMAP structure pointing to PEB.TlsBitmapBits.
+     * PEB+0x44 contains TlsBitmapBits[2] = 64 bits for the first 64 TLS slots. */
+    printf("  Initializing TlsBitmap...\n");
+
+    /* Clear TlsBitmapBits in PEB (all 64 slots available) */
+    write_virt_l(vm, peb + PEB_TLS_BITMAP_BITS + 0, 0);  /* Bits 0-31 */
+    write_virt_l(vm, peb + PEB_TLS_BITMAP_BITS + 4, 0);  /* Bits 32-63 */
+
+    /* Set up RTL_BITMAP structure at VM_TLS_BITMAP_ADDR */
+    uint32_t tls_bitmap = VM_TLS_BITMAP_ADDR;
+    write_virt_l(vm, tls_bitmap + RTL_BITMAP_SIZE_OF_BITMAP, 64);  /* 64 bits */
+    write_virt_l(vm, tls_bitmap + RTL_BITMAP_BUFFER, peb + PEB_TLS_BITMAP_BITS);
+
+    /* Point PEB.TlsBitmap to the RTL_BITMAP structure */
+    write_virt_l(vm, peb + PEB_TLS_BITMAP, tls_bitmap);
+    write_virt_l(vm, peb + PEB_TLS_EXPANSION_COUNTER, 0);
+    printf("  TlsBitmap at 0x%08X, bits at 0x%08X\n", tls_bitmap, peb + PEB_TLS_BITMAP_BITS);
 
     printf("  ImageBase=0x%08X\n", vm->image_base);
     printf("  OS Version: %d.%d.%d (Platform %d)\n",

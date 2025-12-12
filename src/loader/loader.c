@@ -285,21 +285,31 @@ int loader_load_executable(loader_context_t *ctx, vm_context_t *vm,
     }
 
     /* Resolve imports for all loaded DLLs as well
-     * DLLs like kernel32.dll import from ntdll.dll, etc. */
+     * DLLs like kernel32.dll import from ntdll.dll, etc.
+     * We need to iterate multiple times because resolving imports may load new DLLs.
+     * Keep iterating until no new DLLs are loaded in a full pass. */
     printf("\nResolving imports for dependent DLLs...\n");
-    loaded_module_t *dll = ctx->modules.modules;
-    while (dll) {
-        if (!dll->is_main_exe && dll->pe.data_dirs[IMAGE_DIRECTORY_ENTRY_IMPORT].size > 0) {
-            import_stats_t dll_stats = {0};
-            printf("  Resolving imports for %s\n", dll->name);
-            imports_resolve(&ctx->modules, vm, dll, &dll_stats);
-            ctx->import_stats.total_imports += dll_stats.total_imports;
-            ctx->import_stats.stubbed_imports += dll_stats.stubbed_imports;
-            ctx->import_stats.direct_imports += dll_stats.direct_imports;
-            ctx->import_stats.failed_imports += dll_stats.failed_imports;
+    int imports_resolved;
+    do {
+        imports_resolved = 0;
+        loaded_module_t *dll = ctx->modules.modules;
+        while (dll) {
+            /* Only process DLLs that haven't had imports resolved yet */
+            if (!dll->is_main_exe && !dll->imports_resolved &&
+                dll->pe.data_dirs[IMAGE_DIRECTORY_ENTRY_IMPORT].size > 0) {
+                import_stats_t dll_stats = {0};
+                printf("  Resolving imports for %s\n", dll->name);
+                imports_resolve(&ctx->modules, vm, dll, &dll_stats);
+                dll->imports_resolved = true;
+                imports_resolved++;
+                ctx->import_stats.total_imports += dll_stats.total_imports;
+                ctx->import_stats.stubbed_imports += dll_stats.stubbed_imports;
+                ctx->import_stats.direct_imports += dll_stats.direct_imports;
+                ctx->import_stats.failed_imports += dll_stats.failed_imports;
+            }
+            dll = dll->next;
         }
-        dll = dll->next;
-    }
+    } while (imports_resolved > 0);
 
     /* Create LDR entries for any loaded DLLs */
     loaded_module_t *mod = ctx->modules.modules;
@@ -310,6 +320,22 @@ int loader_load_executable(loader_context_t *ctx, vm_context_t *vm,
             }
         }
         mod = mod->next;
+    }
+
+    /* Find ntdll.dll and initialize LdrpHashTable */
+    loaded_module_t *ntdll = module_find_by_name(&ctx->modules, "ntdll.dll");
+    if (ntdll) {
+        /* Initialize the hash table with empty circular lists */
+        module_init_ldrp_hash_table(&ctx->modules, vm, ntdll);
+
+        /* Link all modules into the hash table */
+        mod = ctx->modules.modules;
+        while (mod) {
+            if (mod->ldr_entry_va != 0) {
+                module_link_to_hash_table(&ctx->modules, vm, ntdll, mod);
+            }
+            mod = mod->next;
+        }
     }
 
     printf("\n=== Loading complete ===\n");

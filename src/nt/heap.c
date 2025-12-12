@@ -335,6 +335,48 @@ int heap_install_hooks(heap_state_t *heap, vm_context_t *vm)
         printf("  Patched RtlUnicodeToMultiByteSize at 0x%08X\n", hook_rtl_unicode_size);
     }
 
+    /* OEM string conversion hooks */
+    result = exports_lookup_by_name(ntdll, "RtlOemToUnicodeN");
+    if (result.found && !result.is_forwarder) {
+        uint32_t hook_addr = ntdll->base_va + result.rva;
+        patch_function_entry(vm, hook_addr, WBOX_SYSCALL_OEM_TO_UNICODE);
+        printf("  Patched RtlOemToUnicodeN at 0x%08X\n", hook_addr);
+    }
+
+    result = exports_lookup_by_name(ntdll, "RtlUnicodeToOemN");
+    if (result.found && !result.is_forwarder) {
+        uint32_t hook_addr = ntdll->base_va + result.rva;
+        patch_function_entry(vm, hook_addr, WBOX_SYSCALL_UNICODE_TO_OEM);
+        printf("  Patched RtlUnicodeToOemN at 0x%08X\n", hook_addr);
+    }
+
+    return 0;
+}
+
+int heap_install_kernel32_hooks(vm_context_t *vm, loaded_module_t *kernel32)
+{
+    if (!kernel32) return -1;
+
+    export_lookup_t result;
+
+    printf("Installing kernel32 hooks...\n");
+
+    /* Hook GetCommandLineA */
+    result = exports_lookup_by_name(kernel32, "GetCommandLineA");
+    if (result.found && !result.is_forwarder) {
+        uint32_t hook_addr = kernel32->base_va + result.rva;
+        patch_function_entry(vm, hook_addr, WBOX_SYSCALL_GET_CMD_LINE_A);
+        printf("  Patched GetCommandLineA at 0x%08X\n", hook_addr);
+    }
+
+    /* Hook GetCommandLineW */
+    result = exports_lookup_by_name(kernel32, "GetCommandLineW");
+    if (result.found && !result.is_forwarder) {
+        uint32_t hook_addr = kernel32->base_va + result.rva;
+        patch_function_entry(vm, hook_addr, WBOX_SYSCALL_GET_CMD_LINE_W);
+        printf("  Patched GetCommandLineW at 0x%08X\n", hook_addr);
+    }
+
     return 0;
 }
 

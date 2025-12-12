@@ -24,7 +24,19 @@
 #define TEB_PEB_POINTER         0x30  /* Pointer to PEB */
 #define TEB_LAST_ERROR          0x34  /* Last error value */
 #define TEB_TLS_SLOTS           0xE10 /* TLS slots array (64 slots) */
+#define TEB_ACTIVATION_CONTEXT_STACK_PTR 0x1A8 /* ActivationContextStackPointer */
 #define TEB_SIZE                0x1000 /* Minimum TEB size */
+
+/* ACTIVATION_CONTEXT_STACK structure offsets */
+#define ACTCTX_STACK_ACTIVE_FRAME        0x00  /* ActiveFrame pointer */
+#define ACTCTX_STACK_FRAME_LIST_CACHE    0x04  /* LIST_ENTRY (8 bytes) */
+#define ACTCTX_STACK_FLAGS               0x0C  /* Flags */
+#define ACTCTX_STACK_NEXT_COOKIE_SEQ     0x10  /* NextCookieSequenceNumber */
+#define ACTCTX_STACK_STACK_ID            0x14  /* StackId */
+#define ACTCTX_STACK_SIZE                0x18  /* 24 bytes */
+
+/* Address for ActivationContextStack in TEB page */
+#define VM_ACTCTX_STACK_ADDR    (VM_TEB_ADDR + 0x800)  /* In TEB page, after main TEB data */
 
 /* PEB (Process Environment Block) offsets */
 #define PEB_INHERITED_ADDR_SPACE     0x00  /* InheritedAddressSpace */
@@ -94,6 +106,17 @@
 #define PEB_GDI_SHARED_HANDLE_TABLE  0x94  /* GdiSharedHandleTable */
 
 #define PEB_SIZE                     0x1000 /* Minimum PEB size */
+
+/* TLS Bitmap */
+#define PEB_TLS_EXPANSION_COUNTER    0x3C  /* TlsExpansionCounter */
+#define PEB_TLS_BITMAP               0x40  /* TlsBitmap (RTL_BITMAP*) */
+#define PEB_TLS_BITMAP_BITS          0x44  /* TlsBitmapBits[2] - 64 bits inline */
+/* Note: PEB+0x4C is ReadOnlySharedMemoryBase */
+
+/* RTL_BITMAP structure (8 bytes) */
+#define RTL_BITMAP_SIZE_OF_BITMAP    0x00  /* Number of bits in bitmap */
+#define RTL_BITMAP_BUFFER            0x04  /* Pointer to bitmap buffer */
+#define RTL_BITMAP_SIZE              0x08
 
 /* OS version constants (Windows XP SP3) */
 #define WBOX_OS_MAJOR_VERSION        5

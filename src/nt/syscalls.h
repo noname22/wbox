@@ -324,6 +324,10 @@
 #define WBOX_SYSCALL_UNICODE_TO_MBSTR  0xFFE1  /* RtlUnicodeToMultiByteN */
 #define WBOX_SYSCALL_MBSTR_SIZE        0xFFE2  /* RtlMultiByteToUnicodeSize */
 #define WBOX_SYSCALL_UNICODE_SIZE      0xFFE3  /* RtlUnicodeToMultiByteSize */
+#define WBOX_SYSCALL_OEM_TO_UNICODE    0xFFE4  /* RtlOemToUnicodeN */
+#define WBOX_SYSCALL_UNICODE_TO_OEM    0xFFE5  /* RtlUnicodeToOemN */
+#define WBOX_SYSCALL_GET_CMD_LINE_A    0xFFE6  /* GetCommandLineA */
+#define WBOX_SYSCALL_GET_CMD_LINE_W    0xFFE7  /* GetCommandLineW */
 
 /* NTSTATUS values */
 #define STATUS_SUCCESS              0x00000000
@@ -343,6 +347,7 @@
 #define STATUS_OBJECT_PATH_NOT_FOUND 0xC000003A
 #define STATUS_IO_DEVICE_ERROR      0xC0000185
 #define STATUS_UNSUCCESSFUL         0xC0000001
+#define STATUS_NO_TOKEN             0xC000007C
 
 /* File operation info values (IO_STATUS_BLOCK.Information) */
 #define FILE_SUPERSEDED    0

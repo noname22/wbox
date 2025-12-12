@@ -20,6 +20,8 @@
 #include "nt/syscalls.h"
 #include "nt/heap.h"
 #include "nt/vfs_jail.h"
+#include "loader/loader.h"
+#include "loader/module.h"
 
 static void print_usage(const char *progname)
 {
@@ -231,6 +233,15 @@ int main(int argc, char *argv[])
         /* Install heap hooks if ntdll is loaded */
         if (has_ntdll) {
             heap_install_hooks(&heap, &vm);
+        }
+
+        /* Install kernel32 hooks */
+        if (vm.loader) {
+            loader_context_t *ldr = (loader_context_t *)vm.loader;
+            loaded_module_t *kernel32 = module_find_by_name(&ldr->modules, "kernel32.dll");
+            if (kernel32) {
+                heap_install_kernel32_hooks(&vm, kernel32);
+            }
         }
     } else {
         fprintf(stderr, "Warning: Failed to initialize heap\n");

@@ -68,6 +68,10 @@ uint32_t heap_size(heap_state_t *heap, vm_context_t *vm,
 /* Install function hooks in ntdll.dll for heap functions */
 int heap_install_hooks(heap_state_t *heap, vm_context_t *vm);
 
+/* Install function hooks in kernel32.dll */
+struct loaded_module;  /* Forward declaration */
+int heap_install_kernel32_hooks(vm_context_t *vm, struct loaded_module *kernel32);
+
 /* Check if an address is one of our hooked functions */
 bool heap_is_hooked_addr(heap_state_t *heap, uint32_t addr);
 

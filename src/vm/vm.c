@@ -568,6 +568,20 @@ int vm_call_dll_entry(vm_context_t *vm, uint32_t entry_point, uint32_t base_va, 
     vm->dll_init_done = 0;
     cpu_exit_requested = 0;
 
+    fprintf(stderr, "DLL_ENTRY: start ESP=0x%08X, saved_esp=0x%08X\n", ESP, saved_esp);
+
+    /* Check if this is shell32 - enable tracing */
+    static int trace_enabled = 0;
+    if (entry_point == 0x7A47FBF0) {
+        fprintf(stderr, ">>> TRACING shell32.dll entry point <<<\n");
+        trace_enabled = 1;
+    }
+
+    /* After msvcrt.dll init, check lock table state */
+    if (entry_point == 0x7C311000) {  /* msvcrt.dll entry */
+        fprintf(stderr, ">>> msvcrt.dll DllMain starting <<<\n");
+    }
+
     /* Push arguments for DllMain in stdcall order (right to left)
      * BOOL WINAPI DllMain(HINSTANCE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
      */
@@ -586,8 +600,47 @@ int vm_call_dll_entry(vm_context_t *vm, uint32_t entry_point, uint32_t base_va, 
     cpu_state.pc = entry_point;
 
     /* Run until DLL init done */
+    int iter_count = 0;
+    uint32_t last_esp = ESP;
     while (!vm->dll_init_done && !vm->exit_requested) {
-        exec386(1000);
+        /* For shell32, run one instruction at a time and trace */
+        if (trace_enabled && iter_count < 100) {
+            fprintf(stderr, "TRACE[%d]: EIP=0x%08X ESP=0x%08X EAX=0x%08X\n",
+                    iter_count, cpu_state.pc, ESP, EAX);
+            exec386(1);
+            fprintf(stderr, "TRACE[%d]: AFTER: EIP=0x%08X ESP=0x%08X\n",
+                    iter_count, cpu_state.pc, ESP);
+        } else {
+            exec386(1000);
+        }
+        iter_count++;
+        /* Log significant ESP changes */
+        if ((ESP < last_esp - 0x10000) || (ESP > last_esp + 0x10000)) {
+            fprintf(stderr, "DLL_ENTRY: ESP changed from 0x%08X to 0x%08X after %d iterations\n",
+                    last_esp, ESP, iter_count);
+            last_esp = ESP;
+        }
+        /* Log if stack is getting dangerously low */
+        if (ESP < 0x06000000 && last_esp >= 0x06000000) {
+            fprintf(stderr, "WARNING: Stack below 0x06000000! ESP=0x%08X at iter %d\n", ESP, iter_count);
+        }
+    }
+
+    fprintf(stderr, "DLL_ENTRY: end ESP=0x%08X (before restore)\n", ESP);
+
+    /* After msvcrt.dll init, verify lock table state */
+    if (entry_point == 0x7C311000) {  /* msvcrt.dll entry */
+        /* Lock 0x11 (lock table lock) should be at 0x7c35f4dc (initialized) / 0x7c35f4e0 (CS) */
+        uint32_t lock_11_init_addr = 0x7c35f4dc;
+        uint32_t lock_11_phys = paging_get_phys(&vm->paging, lock_11_init_addr);
+        if (lock_11_phys) {
+            uint32_t init_val = mem_readl_phys(lock_11_phys);
+            fprintf(stderr, ">>> msvcrt.dll: Lock 0x11 initialized flag at 0x%08X = 0x%08X <<<\n",
+                    lock_11_init_addr, init_val);
+        } else {
+            fprintf(stderr, ">>> msvcrt.dll: Lock 0x11 address 0x%08X not mapped! <<<\n",
+                    lock_11_init_addr);
+        }
     }
 
     /* Get return value from EAX (DllMain returns BOOL) */
@@ -668,9 +721,10 @@ int vm_init_dlls(vm_context_t *vm)
     #define INIT_DLL(m, idx) do { \
         if (!(m)->is_main_exe && !inited[idx] && \
             (m)->entry_point != 0 && (m)->entry_point != (m)->base_va) { \
-            printf("  Initializing %s (entry=0x%08X)...", (m)->name, (m)->entry_point); \
+            printf("  Initializing %s (entry=0x%08X, ESP=0x%08X)...", (m)->name, (m)->entry_point, ESP); \
             fflush(stdout); \
             int r = vm_call_dll_entry(vm, (m)->entry_point, (m)->base_va, 1); \
+            printf(" [post ESP=0x%08X]", ESP); \
             if (r) { printf(" OK\n"); initialized++; } \
             else { printf(" FAILED\n"); } \
             inited[idx] = true; \

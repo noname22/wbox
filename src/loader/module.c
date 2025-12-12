@@ -263,6 +263,70 @@ int module_create_ldr_entry(module_manager_t *mgr, vm_context_t *vm,
     return 0;
 }
 
+/*
+ * Initialize LdrpHashTable in ntdll.dll
+ * The hash table is an array of 32 LIST_ENTRY heads for linking modules by name hash.
+ * Without initialization, it contains zeros which causes crashes when iterating.
+ */
+#define LDRP_HASH_TABLE_SIZE    32
+#define LDRP_HASH_TABLE_RVA     0x601e0  /* RVA of LdrpHashTable in ReactOS ntdll.dll */
+
+int module_init_ldrp_hash_table(module_manager_t *mgr, vm_context_t *vm, loaded_module_t *ntdll)
+{
+    if (!ntdll) return -1;
+
+    uint32_t hash_table_va = ntdll->base_va + LDRP_HASH_TABLE_RVA;
+
+    printf("Initializing LdrpHashTable at 0x%08X (in ntdll.dll)\n", hash_table_va);
+
+    /* Initialize each bucket as an empty circular list (pointing to itself) */
+    for (int i = 0; i < LDRP_HASH_TABLE_SIZE; i++) {
+        uint32_t bucket_va = hash_table_va + (i * 8);  /* Each LIST_ENTRY is 8 bytes */
+
+        /* Flink = bucket_va (point to self) */
+        write_virt_l(vm, bucket_va + 0, bucket_va);
+        /* Blink = bucket_va (point to self) */
+        write_virt_l(vm, bucket_va + 4, bucket_va);
+    }
+
+    return 0;
+}
+
+/*
+ * Compute hash bucket index for a DLL name (first char, uppercase, mod 32)
+ */
+static int ldrp_hash_module_name(const char *name)
+{
+    if (!name || !name[0]) return 0;
+
+    /* Get first character, convert to uppercase */
+    char c = name[0];
+    if (c >= 'a' && c <= 'z') {
+        c = c - 'a' + 'A';
+    }
+
+    return c % LDRP_HASH_TABLE_SIZE;
+}
+
+/*
+ * Link a module's HashLinks into the appropriate LdrpHashTable bucket
+ */
+int module_link_to_hash_table(module_manager_t *mgr, vm_context_t *vm,
+                              loaded_module_t *ntdll, loaded_module_t *mod)
+{
+    if (!ntdll || !mod || mod->ldr_entry_va == 0) return -1;
+
+    uint32_t hash_table_va = ntdll->base_va + LDRP_HASH_TABLE_RVA;
+    int bucket = ldrp_hash_module_name(mod->name);
+    uint32_t bucket_va = hash_table_va + (bucket * 8);
+    uint32_t entry_hash_links_va = mod->ldr_entry_va + 0x3C;  /* HashLinks offset */
+
+    /* Insert into hash bucket using list_insert_tail */
+    list_insert_tail(vm, bucket_va, entry_hash_links_va);
+
+    return 0;
+}
+
 loaded_module_t *module_find_by_name(module_manager_t *mgr, const char *name)
 {
     /* Extract base name if path is given */

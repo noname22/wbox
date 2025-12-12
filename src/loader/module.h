@@ -108,6 +108,7 @@ typedef struct loaded_module {
 
     bool            is_main_exe;            /* Is this the main executable? */
     bool            dll_main_called;        /* Has DllMain been called? */
+    bool            imports_resolved;       /* Have imports been resolved? */
 } loaded_module_t;
 
 /* Module manager state */
@@ -164,6 +165,13 @@ int module_init_peb_ldr(module_manager_t *mgr, vm_context_t *vm);
 /* Create LDR_DATA_TABLE_ENTRY in guest memory */
 int module_create_ldr_entry(module_manager_t *mgr, vm_context_t *vm,
                             loaded_module_t *mod);
+
+/* Initialize LdrpHashTable in ntdll.dll (must be called after ntdll is loaded) */
+int module_init_ldrp_hash_table(module_manager_t *mgr, vm_context_t *vm, loaded_module_t *ntdll);
+
+/* Link a module into the LdrpHashTable (must be called after module_create_ldr_entry) */
+int module_link_to_hash_table(module_manager_t *mgr, vm_context_t *vm,
+                              loaded_module_t *ntdll, loaded_module_t *mod);
 
 /* Free a single module */
 void module_free(loaded_module_t *mod);

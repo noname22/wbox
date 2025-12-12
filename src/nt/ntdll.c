@@ -445,6 +445,168 @@ int nt_syscall_handler(void)
             return 1;
         }
 
+        case WBOX_SYSCALL_OEM_TO_UNICODE: {
+            /* RtlOemToUnicodeN(UnicodeString, UnicodeSize, ResultSize, OemString, OemSize)
+             * stdcall, 5 params - same signature as RtlMultiByteToUnicodeN
+             * OEM and ANSI are the same for ASCII range (0-127), so we can use the same logic */
+            uint32_t unicode_str = readmemll(ESP + 4);     /* OUT PWSTR */
+            uint32_t unicode_size = readmemll(ESP + 8);    /* IN ULONG (max bytes) */
+            uint32_t result_size_ptr = readmemll(ESP + 12);/* OUT PULONG (optional) */
+            uint32_t oem_str = readmemll(ESP + 16);        /* IN PCSTR */
+            uint32_t oem_size = readmemll(ESP + 20);       /* IN ULONG (bytes) */
+
+            vm_context_t *vm = vm_get_context();
+            uint32_t chars_converted = 0;
+
+            if (vm && unicode_str != 0 && oem_str != 0) {
+                /* Convert OEM to Unicode - for ASCII, just zero-extend each byte */
+                uint32_t max_chars = unicode_size / 2;
+                uint32_t oem_phys = paging_get_phys(&vm->paging, oem_str);
+                uint32_t unicode_phys = paging_get_phys(&vm->paging, unicode_str);
+
+                if (oem_phys && unicode_phys) {
+                    for (uint32_t i = 0; i < oem_size && chars_converted < max_chars; i++) {
+                        uint8_t ch = mem_readb_phys(oem_phys + i);
+                        /* Write 16-bit Unicode character (little-endian) */
+                        mem_writeb_phys(unicode_phys + chars_converted * 2, ch);
+                        mem_writeb_phys(unicode_phys + chars_converted * 2 + 1, 0);
+                        chars_converted++;
+                    }
+                }
+            }
+
+            /* Store result size if requested */
+            if (vm && result_size_ptr != 0) {
+                uint32_t result_phys = paging_get_phys(&vm->paging, result_size_ptr);
+                if (result_phys) {
+                    mem_writel_phys(result_phys, chars_converted * 2);
+                }
+            }
+
+            stdcall_return(STATUS_SUCCESS, 5);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_UNICODE_TO_OEM: {
+            /* RtlUnicodeToOemN(OemString, OemSize, ResultSize, UnicodeString, UnicodeSize)
+             * stdcall, 5 params - same signature as RtlUnicodeToMultiByteN */
+            uint32_t oem_str = readmemll(ESP + 4);         /* OUT PCHAR */
+            uint32_t oem_size = readmemll(ESP + 8);        /* IN ULONG (max bytes) */
+            uint32_t result_size_ptr = readmemll(ESP + 12);/* OUT PULONG (optional) */
+            uint32_t unicode_str = readmemll(ESP + 16);    /* IN PCWSTR */
+            uint32_t unicode_size = readmemll(ESP + 20);   /* IN ULONG (bytes) */
+
+            vm_context_t *vm = vm_get_context();
+            uint32_t bytes_written = 0;
+
+            if (vm && oem_str != 0 && unicode_str != 0) {
+                /* Convert Unicode to OEM - for ASCII range, just truncate to 8-bit */
+                uint32_t chars_to_convert = unicode_size / 2;
+                uint32_t oem_phys = paging_get_phys(&vm->paging, oem_str);
+                uint32_t unicode_phys = paging_get_phys(&vm->paging, unicode_str);
+
+                if (oem_phys && unicode_phys) {
+                    for (uint32_t i = 0; i < chars_to_convert && bytes_written < oem_size; i++) {
+                        uint16_t wch = mem_readb_phys(unicode_phys + i * 2) |
+                                       (mem_readb_phys(unicode_phys + i * 2 + 1) << 8);
+                        /* Map non-ASCII to '?' like Windows does */
+                        uint8_t ch = (wch <= 0x7F) ? (uint8_t)wch : '?';
+                        mem_writeb_phys(oem_phys + bytes_written, ch);
+                        bytes_written++;
+                    }
+                }
+            }
+
+            /* Store result size if requested */
+            if (vm && result_size_ptr != 0) {
+                uint32_t result_phys = paging_get_phys(&vm->paging, result_size_ptr);
+                if (result_phys) {
+                    mem_writel_phys(result_phys, bytes_written);
+                }
+            }
+
+            stdcall_return(STATUS_SUCCESS, 5);
+            return 1;
+        }
+
+        case WBOX_SYSCALL_GET_CMD_LINE_A: {
+            /* GetCommandLineA() - stdcall, 0 params
+             * Returns pointer to ANSI command line string.
+             * We use a static buffer allocated in guest memory. */
+            vm_context_t *vm = vm_get_context();
+            static uint32_t cmdline_a_addr = 0;
+
+            if (vm && cmdline_a_addr == 0) {
+                /* Allocate guest memory for ANSI command line - use loader heap area */
+                /* Put it after TlsBitmap (0x7FFDE840) */
+                cmdline_a_addr = 0x7FFDE860;
+                /* Read the command line from ProcessParameters and convert to ANSI */
+                uint32_t peb = vm->peb_addr;
+                uint32_t peb_phys = paging_get_phys(&vm->paging, peb);
+                if (peb_phys) {
+                    uint32_t params = mem_readl_phys(peb_phys + 0x10);  /* PEB_PROCESS_PARAMETERS */
+                    uint32_t params_phys = paging_get_phys(&vm->paging, params);
+                    if (params_phys) {
+                        /* CommandLine UNICODE_STRING at offset 0x40 */
+                        uint32_t cmd_buffer = mem_readl_phys(params_phys + 0x40 + 4);  /* Buffer pointer */
+                        uint16_t cmd_len = mem_readw_phys(params_phys + 0x40);  /* Length in bytes */
+                        uint32_t cmd_phys = paging_get_phys(&vm->paging, cmd_buffer);
+                        uint32_t dest_phys = paging_get_phys(&vm->paging, cmdline_a_addr);
+                        if (cmd_phys && dest_phys && cmd_len > 0) {
+                            /* Convert wide string to ANSI */
+                            for (uint32_t i = 0; i < cmd_len / 2 && i < 255; i++) {
+                                uint16_t wch = mem_readw_phys(cmd_phys + i * 2);
+                                uint8_t ch = (wch <= 0x7F) ? (uint8_t)wch : '?';
+                                mem_writeb_phys(dest_phys + i, ch);
+                            }
+                            mem_writeb_phys(dest_phys + cmd_len / 2, 0);  /* Null terminate */
+                        } else if (dest_phys) {
+                            /* Empty command line */
+                            mem_writeb_phys(dest_phys, 0);
+                        }
+                    }
+                }
+            }
+
+            /* Return pointer to static buffer */
+            EAX = cmdline_a_addr;
+            /* Pop return address and return (stdcall, 0 params) */
+            uint32_t ret_addr = readmemll(ESP);
+            ESP += 4;
+            cpu_state.pc = ret_addr;
+            return 1;
+        }
+
+        case WBOX_SYSCALL_GET_CMD_LINE_W: {
+            /* GetCommandLineW() - stdcall, 0 params
+             * Returns pointer to wide command line string.
+             * The command line is already stored in ProcessParameters. */
+            vm_context_t *vm = vm_get_context();
+            uint32_t cmdline_w_addr = 0;
+
+            if (vm) {
+                /* Get command line from ProcessParameters */
+                uint32_t peb = vm->peb_addr;
+                uint32_t peb_phys = paging_get_phys(&vm->paging, peb);
+                if (peb_phys) {
+                    uint32_t params = mem_readl_phys(peb_phys + 0x10);  /* PEB_PROCESS_PARAMETERS */
+                    uint32_t params_phys = paging_get_phys(&vm->paging, params);
+                    if (params_phys) {
+                        /* CommandLine UNICODE_STRING at offset 0x40 */
+                        cmdline_w_addr = mem_readl_phys(params_phys + 0x40 + 4);  /* Buffer pointer */
+                    }
+                }
+            }
+
+            /* Return pointer to command line buffer in ProcessParameters */
+            EAX = cmdline_w_addr;
+            /* Pop return address and return (stdcall, 0 params) */
+            uint32_t ret_addr = readmemll(ESP);
+            ESP += 4;
+            cpu_state.pc = ret_addr;
+            return 1;
+        }
+
         case NtCreateSection: {
             /* NtCreateSection(SectionHandle, DesiredAccess, ObjectAttributes, MaxSize, PageProtection, AllocationAttributes, FileHandle)
              * syscall, 7 params on stack
@@ -453,6 +615,17 @@ int nt_syscall_handler(void)
              * so return STATUS_ACCESS_DENIED to let the caller handle it gracefully.
              * Many paths have fallback code when section creation fails. */
             syscall_return(STATUS_ACCESS_DENIED);
+            return 1;
+        }
+
+        case NtOpenThreadToken:
+        case NtOpenThreadTokenEx:
+        case NtOpenProcessToken:
+        case NtOpenProcessTokenEx: {
+            /* NtOpenThreadToken[Ex] / NtOpenProcessToken[Ex]
+             * Security token operations - we don't have a security subsystem
+             * Return error so caller uses fallback path */
+            syscall_return(STATUS_NO_TOKEN);
             return 1;
         }
 
@@ -530,6 +703,24 @@ int nt_syscall_handler(void)
             }
 
             syscall_return(STATUS_SUCCESS);
+            return 1;
+        }
+
+        case NtQueryAttributesFile: {
+            /* NtQueryAttributesFile(ObjectAttributes, FileInformation)
+             * syscall, 2 params on stack
+             * Used to check if a file exists and get basic info.
+             * Return STATUS_OBJECT_NAME_NOT_FOUND - caller will handle gracefully. */
+            syscall_return(STATUS_OBJECT_NAME_NOT_FOUND);
+            return 1;
+        }
+
+        case NtQueryFullAttributesFile: {
+            /* NtQueryFullAttributesFile(ObjectAttributes, FileInformation)
+             * syscall, 2 params on stack
+             * Similar to NtQueryAttributesFile but returns more info.
+             * Return STATUS_OBJECT_NAME_NOT_FOUND - caller will handle gracefully. */
+            syscall_return(STATUS_OBJECT_NAME_NOT_FOUND);
             return 1;
         }
 
