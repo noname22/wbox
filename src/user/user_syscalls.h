@@ -34,6 +34,54 @@ ntstatus_t sys_NtUserRegisterClassExWOW(void);
 /* NtUserCreateWindowEx - create a window */
 ntstatus_t sys_NtUserCreateWindowEx(void);
 
+/* NtUserShowWindow - show/hide a window */
+ntstatus_t sys_NtUserShowWindow(void);
+
+/*
+ * Message queue syscalls
+ */
+
+/* NtUserPeekMessage - peek at message queue */
+ntstatus_t sys_NtUserPeekMessage(void);
+
+/* NtUserGetMessage - get message from queue (blocking) */
+ntstatus_t sys_NtUserGetMessage(void);
+
+/* NtUserTranslateMessage - translate key messages */
+ntstatus_t sys_NtUserTranslateMessage(void);
+
+/* NtUserDispatchMessage - dispatch message to window procedure */
+ntstatus_t sys_NtUserDispatchMessage(void);
+
+/* NtUserPostMessage - post message to window */
+ntstatus_t sys_NtUserPostMessage(void);
+
+/* NtUserPostQuitMessage - post WM_QUIT */
+ntstatus_t sys_NtUserPostQuitMessage(void);
+
+/*
+ * Focus/activation syscalls
+ */
+
+/* NtUserSetFocus - set keyboard focus */
+ntstatus_t sys_NtUserSetFocus(void);
+
+/* NtUserGetForegroundWindow - get foreground window */
+ntstatus_t sys_NtUserGetForegroundWindow(void);
+
+/* NtUserSetActiveWindow - set active window */
+ntstatus_t sys_NtUserSetActiveWindow(void);
+
+/*
+ * Input syscalls
+ */
+
+/* NtUserGetKeyState - get key state */
+ntstatus_t sys_NtUserGetKeyState(void);
+
+/* NtUserGetAsyncKeyState - get async key state */
+ntstatus_t sys_NtUserGetAsyncKeyState(void);
+
 /*
  * Helper functions
  */

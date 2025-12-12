@@ -6,16 +6,19 @@
 #include "user_handle_table.h"
 #include "user_class.h"
 #include "user_window.h"
+#include "user_message.h"
 #include "../nt/syscalls.h"
 #include "../nt/win32k_syscalls.h"
 #include "../vm/vm.h"
 #include "../vm/paging.h"
+#include "../gdi/display.h"
 #include "../cpu/cpu.h"
 #include "../cpu/mem.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 /* Client callback function pointers (from NtUserInitializeClientPfnArrays) */
 static uint32_t g_pfnClientA = 0;
@@ -212,6 +215,9 @@ static int user_ensure_init(void)
         printf("USER: Failed to initialize class subsystem\n");
         return -1;
     }
+
+    /* Initialize message queue */
+    msg_queue_init();
 
     g_user_initialized = true;
     printf("USER: Subsystem initialized\n");
@@ -543,3 +549,428 @@ bool user_is_client_pfn_init(void) { return g_client_pfn_init; }
  * Check if USER subsystem is initialized
  */
 bool user_is_initialized(void) { return g_user_initialized; }
+
+/*
+ * NtUserPeekMessage - peek at message queue
+ * Syscall number: 479
+ *
+ * Parameters:
+ *   arg0: PMSG pMsg            - Output message buffer
+ *   arg1: HWND hwnd            - Window filter (0 = all)
+ *   arg2: UINT msgFilterMin    - Message filter minimum
+ *   arg3: UINT msgFilterMax    - Message filter maximum
+ *   arg4: UINT removeFlags     - PM_NOREMOVE, PM_REMOVE
+ *
+ * Returns: BOOL (TRUE if message available)
+ */
+ntstatus_t sys_NtUserPeekMessage(void)
+{
+    uint32_t pMsg         = read_stack_arg(0);
+    uint32_t hwnd         = read_stack_arg(1);
+    uint32_t msgFilterMin = read_stack_arg(2);
+    uint32_t msgFilterMax = read_stack_arg(3);
+    uint32_t removeFlags  = read_stack_arg(4);
+
+    vm_context_t *vm = vm_get_context();
+
+    /* Poll SDL events first to generate new messages */
+    if (vm && vm->gui_mode) {
+        display_poll_events(&vm->display);
+
+        /* Check if quit was requested via SDL */
+        if (vm->display.quit_requested) {
+            msg_queue_post_quit(0);
+        }
+    }
+
+    /* Try to get a message */
+    WBOX_MSG msg;
+    bool found = msg_queue_peek(&msg, hwnd, msgFilterMin, msgFilterMax, removeFlags);
+
+    if (found && pMsg != 0) {
+        msg_write_to_guest(vm, pMsg, &msg);
+    }
+
+    EAX = found ? 1 : 0;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserGetMessage - get message from queue (blocking)
+ * Syscall number: 426
+ *
+ * Parameters:
+ *   arg0: PMSG pMsg            - Output message buffer
+ *   arg1: HWND hwnd            - Window filter (0 = all)
+ *   arg2: UINT msgFilterMin    - Message filter minimum
+ *   arg3: UINT msgFilterMax    - Message filter maximum
+ *
+ * Returns: BOOL (FALSE for WM_QUIT, TRUE otherwise, -1 on error)
+ */
+ntstatus_t sys_NtUserGetMessage(void)
+{
+    uint32_t pMsg         = read_stack_arg(0);
+    uint32_t hwnd         = read_stack_arg(1);
+    uint32_t msgFilterMin = read_stack_arg(2);
+    uint32_t msgFilterMax = read_stack_arg(3);
+
+    vm_context_t *vm = vm_get_context();
+
+    /* Block until message available */
+    WBOX_MSG msg;
+    bool found = false;
+
+    while (!found) {
+        /* Poll SDL events */
+        if (vm && vm->gui_mode) {
+            display_poll_events(&vm->display);
+
+            /* Check if quit was requested via SDL */
+            if (vm->display.quit_requested) {
+                msg_queue_post_quit(0);
+            }
+        }
+
+        /* Check for message */
+        found = msg_queue_peek(&msg, hwnd, msgFilterMin, msgFilterMax, PM_REMOVE);
+
+        if (!found) {
+            /* No message - yield briefly and try again */
+            /* In a real implementation we'd use select() or similar */
+            /* For now, just present the display and continue */
+            if (vm && vm->gui_mode) {
+                display_present(&vm->display);
+            }
+
+            /* Small delay to avoid busy-spinning */
+            struct timespec ts = { 0, 10000000 };  /* 10ms */
+            nanosleep(&ts, NULL);
+        }
+    }
+
+    if (pMsg != 0) {
+        msg_write_to_guest(vm, pMsg, &msg);
+    }
+
+    /* Return FALSE only for WM_QUIT */
+    if (msg.message == WM_QUIT) {
+        EAX = 0;
+    } else {
+        EAX = 1;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserTranslateMessage - translate virtual key messages to char messages
+ * Syscall number: 571
+ *
+ * Parameters:
+ *   arg0: const MSG *pMsg      - Message to translate
+ *   arg1: UINT flags           - Flags (usually 0)
+ *
+ * Returns: BOOL (TRUE if translated)
+ */
+ntstatus_t sys_NtUserTranslateMessage(void)
+{
+    uint32_t pMsg  = read_stack_arg(0);
+    uint32_t flags = read_stack_arg(1);
+    (void)flags;
+
+    vm_context_t *vm = vm_get_context();
+
+    /* Read the message */
+    WBOX_MSG msg;
+    msg_read_from_guest(vm, pMsg, &msg);
+
+    /* Only translate keyboard messages */
+    if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) {
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* TODO: Proper keyboard translation using keyboard layout */
+    /* For now, simple ASCII mapping for printable characters */
+    uint32_t vk = msg.wParam;
+
+    /* Simple translation: if key is printable ASCII, post WM_CHAR */
+    char ch = 0;
+    if (vk >= 'A' && vk <= 'Z') {
+        /* Check shift state */
+        bool shift = (g_msg_queue.keyState[0x10] & 0x80) != 0;  /* VK_SHIFT */
+        ch = shift ? vk : (vk + 32);  /* Lowercase if not shifted */
+    } else if (vk >= '0' && vk <= '9') {
+        ch = (char)vk;
+    } else if (vk == 0x20) {  /* VK_SPACE */
+        ch = ' ';
+    } else if (vk == 0x0D) {  /* VK_RETURN */
+        ch = '\r';
+    }
+
+    if (ch != 0) {
+        msg_queue_post(msg.hwnd, WM_CHAR, ch, msg.lParam);
+        EAX = 1;
+    } else {
+        EAX = 0;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserDispatchMessage - dispatch message to window procedure
+ * Syscall number: 362
+ *
+ * Parameters:
+ *   arg0: const MSG *pMsg      - Message to dispatch
+ *
+ * Returns: LRESULT
+ */
+ntstatus_t sys_NtUserDispatchMessage(void)
+{
+    uint32_t pMsg = read_stack_arg(0);
+
+    vm_context_t *vm = vm_get_context();
+
+    /* Read the message */
+    WBOX_MSG msg;
+    msg_read_from_guest(vm, pMsg, &msg);
+
+    /* Find the window */
+    WBOX_WND *wnd = user_window_from_hwnd(msg.hwnd);
+    if (!wnd) {
+        /* No window - return 0 */
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* Get window procedure */
+    uint32_t wndproc = wnd->lpfnWndProc;
+    if (wndproc == 0 && wnd->pcls) {
+        wndproc = wnd->pcls->lpfnWndProc;
+    }
+
+    if (wndproc == 0) {
+        /* No window procedure */
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* TODO: Actually call the window procedure via callback mechanism */
+    /* For now, we'll implement this in user_callback.c */
+    /* This is a placeholder that returns 0 */
+
+    printf("USER: NtUserDispatchMessage(hwnd=0x%X, msg=0x%X) - wndproc=0x%X\n",
+           msg.hwnd, msg.message, wndproc);
+
+    EAX = 0;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserPostMessage - post a message to a window
+ * Syscall number: 497
+ *
+ * Parameters:
+ *   arg0: HWND hwnd            - Target window
+ *   arg1: UINT msg             - Message ID
+ *   arg2: WPARAM wParam        - Word parameter
+ *   arg3: LPARAM lParam        - Long parameter
+ *
+ * Returns: BOOL (TRUE on success)
+ */
+ntstatus_t sys_NtUserPostMessage(void)
+{
+    uint32_t hwnd   = read_stack_arg(0);
+    uint32_t message = read_stack_arg(1);
+    uint32_t wParam = read_stack_arg(2);
+    uint32_t lParam = read_stack_arg(3);
+
+    bool result = msg_queue_post(hwnd, message, wParam, lParam);
+    EAX = result ? 1 : 0;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserPostQuitMessage - post WM_QUIT
+ * Syscall number: 498
+ *
+ * Parameters:
+ *   arg0: int exitCode         - Exit code
+ */
+ntstatus_t sys_NtUserPostQuitMessage(void)
+{
+    int exitCode = (int)read_stack_arg(0);
+
+    msg_queue_post_quit(exitCode);
+    EAX = 0;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserShowWindow - show or hide a window
+ * Syscall number: 554
+ *
+ * Parameters:
+ *   arg0: HWND hwnd            - Window handle
+ *   arg1: int nCmdShow         - Show command (SW_*)
+ *
+ * Returns: BOOL (previous visibility state)
+ */
+ntstatus_t sys_NtUserShowWindow(void)
+{
+    uint32_t hwnd    = read_stack_arg(0);
+    int32_t nCmdShow = (int32_t)read_stack_arg(1);
+
+    WBOX_WND *wnd = user_window_from_hwnd(hwnd);
+    if (!wnd) {
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    bool wasVisible = user_window_is_visible(wnd);
+
+    /* Update visibility */
+    user_window_show(wnd, nCmdShow);
+
+    /* If becoming visible, mark for painting */
+    if (!wasVisible && user_window_is_visible(wnd)) {
+        /* Post WM_SHOWWINDOW */
+        msg_queue_post(hwnd, WM_SHOWWINDOW, 1, 0);
+
+        /* Post WM_SIZE */
+        int width = wnd->rcClient.right - wnd->rcClient.left;
+        int height = wnd->rcClient.bottom - wnd->rcClient.top;
+        msg_queue_post(hwnd, WM_SIZE, SIZE_RESTORED, MAKELPARAM(width, height));
+
+        /* Mark for repaint */
+        wnd->state |= WNDS_SENDNCPAINT | WNDS_SENDERASEBACKGROUND;
+    }
+
+    printf("USER: ShowWindow(hwnd=0x%X, cmd=%d) -> wasVisible=%d\n",
+           hwnd, nCmdShow, wasVisible);
+
+    EAX = wasVisible ? 1 : 0;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserSetFocus - set keyboard focus
+ * Syscall number: 527
+ *
+ * Parameters:
+ *   arg0: HWND hwnd            - Window to receive focus
+ *
+ * Returns: HWND (previous focus window)
+ */
+ntstatus_t sys_NtUserSetFocus(void)
+{
+    uint32_t hwnd = read_stack_arg(0);
+
+    uint32_t oldFocus = g_msg_queue.hwndFocus;
+
+    if (oldFocus != hwnd) {
+        /* Send WM_KILLFOCUS to old window */
+        if (oldFocus != 0) {
+            msg_queue_post(oldFocus, WM_KILLFOCUS, hwnd, 0);
+        }
+
+        /* Update focus */
+        g_msg_queue.hwndFocus = hwnd;
+
+        /* Send WM_SETFOCUS to new window */
+        if (hwnd != 0) {
+            msg_queue_post(hwnd, WM_SETFOCUS, oldFocus, 0);
+        }
+    }
+
+    EAX = oldFocus;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserGetForegroundWindow - get foreground window
+ * Syscall number: 405
+ *
+ * Returns: HWND
+ */
+ntstatus_t sys_NtUserGetForegroundWindow(void)
+{
+    EAX = g_msg_queue.hwndActive;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserSetActiveWindow - set active window
+ * Syscall number: 508
+ *
+ * Parameters:
+ *   arg0: HWND hwnd            - Window to activate
+ *
+ * Returns: HWND (previous active window)
+ */
+ntstatus_t sys_NtUserSetActiveWindow(void)
+{
+    uint32_t hwnd = read_stack_arg(0);
+
+    uint32_t oldActive = g_msg_queue.hwndActive;
+
+    if (oldActive != hwnd) {
+        /* Deactivate old window */
+        if (oldActive != 0) {
+            msg_queue_post(oldActive, WM_ACTIVATE, WA_INACTIVE, hwnd);
+        }
+
+        /* Update active window */
+        g_msg_queue.hwndActive = hwnd;
+
+        /* Activate new window */
+        if (hwnd != 0) {
+            msg_queue_post(hwnd, WM_ACTIVATE, WA_ACTIVE, oldActive);
+        }
+    }
+
+    EAX = oldActive;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserGetKeyState - get key state
+ * Syscall number: 411
+ *
+ * Parameters:
+ *   arg0: int vKey             - Virtual key code
+ *
+ * Returns: SHORT (high bit = down, low bit = toggled)
+ */
+ntstatus_t sys_NtUserGetKeyState(void)
+{
+    int vKey = (int)read_stack_arg(0);
+
+    uint8_t state = g_msg_queue.keyState[vKey & 0xFF];
+
+    /* Return format: high bit set if key is down */
+    uint16_t result = (state & 0x80) ? 0x8000 : 0;
+
+    /* Low bit is toggle state (for caps lock, etc.) */
+    result |= (state & 0x01);
+
+    EAX = result;
+    return STATUS_SUCCESS;
+}
+
+/*
+ * NtUserGetAsyncKeyState - get async key state
+ * Syscall number: 389
+ *
+ * Parameters:
+ *   arg0: int vKey             - Virtual key code
+ *
+ * Returns: SHORT
+ */
+ntstatus_t sys_NtUserGetAsyncKeyState(void)
+{
+    /* For now, same as GetKeyState */
+    return sys_NtUserGetKeyState();
+}

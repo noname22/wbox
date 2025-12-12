@@ -1291,6 +1291,34 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
         /* Window management syscalls */
         case NtUserCreateWindowEx - WIN32K_SYSCALL_BASE:
             return sys_NtUserCreateWindowEx();
+        case NtUserShowWindow - WIN32K_SYSCALL_BASE:
+            return sys_NtUserShowWindow();
+
+        /* Message queue syscalls */
+        case NtUserPeekMessage - WIN32K_SYSCALL_BASE:
+            return sys_NtUserPeekMessage();
+        case NtUserGetMessage - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetMessage();
+        case NtUserTranslateMessage - WIN32K_SYSCALL_BASE:
+            return sys_NtUserTranslateMessage();
+        case NtUserDispatchMessage - WIN32K_SYSCALL_BASE:
+            return sys_NtUserDispatchMessage();
+        case NtUserPostMessage - WIN32K_SYSCALL_BASE:
+            return sys_NtUserPostMessage();
+
+        /* Focus/activation syscalls */
+        case NtUserSetFocus - WIN32K_SYSCALL_BASE:
+            return sys_NtUserSetFocus();
+        case NtUserGetForegroundWindow - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetForegroundWindow();
+        case NtUserSetActiveWindow - WIN32K_SYSCALL_BASE:
+            return sys_NtUserSetActiveWindow();
+
+        /* Input syscalls */
+        case NtUserGetKeyState - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetKeyState();
+        case NtUserGetAsyncKeyState - WIN32K_SYSCALL_BASE:
+            return sys_NtUserGetAsyncKeyState();
 
         default:
             /* Unknown syscall - log and return success with 0 */
