@@ -280,4 +280,25 @@ uint32_t user_window_set_long(WBOX_WND *wnd, int index, uint32_t value);
 #define DWL_DLGPROC     4
 #define DWL_USER        8
 
+/*
+ * Find a child window matching class and/or title
+ * @param parent Parent window to search in
+ * @param child_after Start searching after this child (NULL = from first)
+ * @param class_atom Class atom to match (0 = any class)
+ * @param window_name Window title to match (NULL = any title)
+ * @return Matching window or NULL
+ */
+WBOX_WND *user_window_find_child(WBOX_WND *parent, WBOX_WND *child_after,
+                                  uint16_t class_atom, const wchar_t *window_name);
+
+/*
+ * Recursively find a window in the entire tree
+ * @param parent Root of subtree to search
+ * @param class_atom Class atom to match (0 = any)
+ * @param window_name Window title to match (NULL = any)
+ * @return Matching window or NULL
+ */
+WBOX_WND *user_window_find_recursive(WBOX_WND *parent, uint16_t class_atom,
+                                      const wchar_t *window_name);
+
 #endif /* WBOX_USER_WINDOW_H */

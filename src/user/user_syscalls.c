@@ -1630,17 +1630,92 @@ ntstatus_t sys_NtUserFindWindowEx(void)
     uint32_t hwndChildAfter = read_stack_arg(1);
     uint32_t pucClassName = read_stack_arg(2);
     uint32_t pucWindowName = read_stack_arg(3);
-    /* arg4 is dwType */
+    /* arg4 is dwType - currently ignored */
 
-    (void)hwndChildAfter;
-    (void)pucClassName;
-    (void)pucWindowName;
-    (void)hwndParent;
+    wchar_t classNameBuf[256];
+    wchar_t windowNameBuf[256];
 
-    /* Simplified: just return NULL (no matching window found)
-     * A full implementation would enumerate windows and match by class/title
-     */
-    EAX = 0;
+    fprintf(stderr, "SYSCALL: NtUserFindWindowEx(parent=0x%X, after=0x%X, class=0x%X, name=0x%X)\n",
+            hwndParent, hwndChildAfter, pucClassName, pucWindowName);
+
+    /* 1. Resolve parent window */
+    WBOX_WND *parent = NULL;
+    if (hwndParent == 0) {
+        parent = user_window_get_desktop();
+    } else {
+        parent = user_window_from_hwnd(hwndParent);
+        if (!parent) {
+            fprintf(stderr, "  -> Invalid parent hwnd\n");
+            EAX = 0;
+            return STATUS_SUCCESS;
+        }
+    }
+
+    /* 2. Resolve child_after (if specified) */
+    WBOX_WND *child_after = NULL;
+    if (hwndChildAfter != 0) {
+        child_after = user_window_from_hwnd(hwndChildAfter);
+        /* If child_after is invalid, we start from the beginning */
+    }
+
+    /* 3. Parse class name (UNICODE_STRING or atom) */
+    uint16_t class_atom = 0;
+    if (pucClassName != 0) {
+        uint16_t atom_result = read_guest_unicode_string(pucClassName, classNameBuf, 256);
+        if (atom_result != 0) {
+            /* It's an atom */
+            class_atom = atom_result;
+            fprintf(stderr, "  -> Class atom: 0x%04X\n", class_atom);
+        } else if (classNameBuf[0] != 0) {
+            /* It's a string - look up class by name to get atom */
+            fprintf(stderr, "  -> Class name: '%ls'\n", classNameBuf);
+            WBOX_CLS *cls = user_class_find(classNameBuf, 0);
+            if (cls) {
+                class_atom = cls->atomClassName;
+                fprintf(stderr, "  -> Found class with atom: 0x%04X\n", class_atom);
+            } else {
+                /* Class not found - no windows can match */
+                fprintf(stderr, "  -> Class not found, returning NULL\n");
+                EAX = 0;
+                return STATUS_SUCCESS;
+            }
+        }
+    }
+
+    /* 4. Parse window name (UNICODE_STRING) */
+    const wchar_t *window_name = NULL;
+    if (pucWindowName != 0) {
+        read_guest_unicode_string(pucWindowName, windowNameBuf, 256);
+        if (windowNameBuf[0] != 0) {
+            window_name = windowNameBuf;
+            fprintf(stderr, "  -> Window name: '%ls'\n", window_name);
+        }
+    }
+
+    /* 5. Search for matching window */
+    WBOX_WND *found = NULL;
+
+    if (hwndParent == 0 || parent == user_window_get_desktop()) {
+        /* Desktop search: search recursively through all windows */
+        if (child_after != NULL) {
+            /* Start from child_after's next sibling, then search recursively */
+            found = user_window_find_child(parent, child_after, class_atom, window_name);
+        } else {
+            found = user_window_find_recursive(parent, class_atom, window_name);
+        }
+    } else {
+        /* Non-desktop: search only direct children */
+        found = user_window_find_child(parent, child_after, class_atom, window_name);
+    }
+
+    /* 6. Return result */
+    if (found) {
+        fprintf(stderr, "  -> Found: hwnd=0x%X\n", found->hwnd);
+        EAX = found->hwnd;
+    } else {
+        fprintf(stderr, "  -> Not found\n");
+        EAX = 0;
+    }
     return STATUS_SUCCESS;
 }
 

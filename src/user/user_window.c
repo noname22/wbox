@@ -552,3 +552,105 @@ uint32_t user_window_set_long(WBOX_WND *wnd, int index, uint32_t value)
 
     return old;
 }
+
+/*
+ * Case-insensitive wide string comparison (ASCII only)
+ */
+static int wcsicmp_simple(const wchar_t *s1, const wchar_t *s2)
+{
+    if (!s1 && !s2) return 0;
+    if (!s1) return -1;
+    if (!s2) return 1;
+
+    while (*s1 && *s2) {
+        wchar_t c1 = (*s1 >= 'A' && *s1 <= 'Z') ? *s1 + 32 : *s1;
+        wchar_t c2 = (*s2 >= 'A' && *s2 <= 'Z') ? *s2 + 32 : *s2;
+        if (c1 != c2) return c1 - c2;
+        s1++; s2++;
+    }
+    return *s1 - *s2;
+}
+
+/*
+ * Check if a window matches the given class atom and/or window name
+ */
+static bool window_matches(WBOX_WND *wnd, uint16_t class_atom, const wchar_t *window_name)
+{
+    if (!wnd) return false;
+
+    /* Check class atom if specified */
+    if (class_atom != 0) {
+        if (!wnd->pcls || wnd->pcls->atomClassName != class_atom) {
+            return false;
+        }
+    }
+
+    /* Check window name if specified */
+    if (window_name != NULL) {
+        if (wcsicmp_simple(wnd->strName, window_name) != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/*
+ * Find a child window matching class and/or title
+ */
+WBOX_WND *user_window_find_child(WBOX_WND *parent, WBOX_WND *child_after,
+                                  uint16_t class_atom, const wchar_t *window_name)
+{
+    if (!parent) return NULL;
+
+    WBOX_WND *child = parent->spwndChild;
+    bool past_child_after = (child_after == NULL);
+
+    while (child) {
+        /* Skip until we pass child_after */
+        if (!past_child_after) {
+            if (child == child_after) {
+                past_child_after = true;
+            }
+            child = child->spwndNext;
+            continue;
+        }
+
+        /* Check if this child matches */
+        if (window_matches(child, class_atom, window_name)) {
+            return child;
+        }
+
+        child = child->spwndNext;
+    }
+
+    return NULL;
+}
+
+/*
+ * Recursively find a window in the entire tree
+ */
+WBOX_WND *user_window_find_recursive(WBOX_WND *parent, uint16_t class_atom,
+                                      const wchar_t *window_name)
+{
+    if (!parent) return NULL;
+
+    /* Search through children */
+    WBOX_WND *child = parent->spwndChild;
+    while (child) {
+        /* Check if this child matches */
+        if (window_matches(child, class_atom, window_name)) {
+            return child;
+        }
+
+        /* Recursively search this child's subtree */
+        WBOX_WND *found = user_window_find_recursive(child, class_atom, window_name);
+        if (found) {
+            return found;
+        }
+
+        child = child->spwndNext;
+    }
+
+    return NULL;
+}
