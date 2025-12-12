@@ -10,6 +10,7 @@
 #include "../cpu/mem.h"
 #include "../vm/vm.h"
 #include "../vm/paging.h"
+#include "../user/user_callback.h"
 
 #include <stdio.h>
 
@@ -250,6 +251,12 @@ int nt_syscall_handler(void)
                 vm->dll_init_done = 1;
             }
             cpu_exit_requested = 1;  /* Stop execution */
+            return 1;
+        }
+
+        case WBOX_SYSCALL_WNDPROC_RETURN: {
+            /* WndProc callback returned - EAX contains the result */
+            user_callback_return(EAX);
             return 1;
         }
 

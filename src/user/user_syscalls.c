@@ -7,6 +7,7 @@
 #include "user_class.h"
 #include "user_window.h"
 #include "user_message.h"
+#include "user_callback.h"
 #include "../nt/syscalls.h"
 #include "../nt/win32k_syscalls.h"
 #include "../vm/vm.h"
@@ -529,10 +530,30 @@ ntstatus_t sys_NtUserCreateWindowEx(void)
         return STATUS_SUCCESS;
     }
 
-    /* TODO: Send WM_NCCREATE, WM_CREATE messages via guest callback */
-    /* For now, just return the handle */
+    printf("USER: Created window hwnd=0x%08X, wndproc=0x%08X\n", wnd->hwnd, wnd->lpfnWndProc);
 
-    printf("USER: Created window hwnd=0x%08X\n", wnd->hwnd);
+    /* Send WM_NCCREATE message via callback
+     * WM_NCCREATE normally receives CREATESTRUCT* in lParam
+     * For now, pass 0 - proper implementation would allocate and fill CREATESTRUCT */
+    uint32_t result = user_call_wndproc(vm_get_context(), wnd, WM_NCCREATE, 0, 0);
+    if (result == 0) {
+        /* WM_NCCREATE returned FALSE - destroy window and fail */
+        fprintf(stderr, "USER: WM_NCCREATE returned FALSE, destroying window\n");
+        user_window_destroy(wnd);
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /* Send WM_CREATE message via callback */
+    result = user_call_wndproc(vm_get_context(), wnd, WM_CREATE, 0, 0);
+    if (result == (uint32_t)-1) {
+        /* WM_CREATE returned -1 - destroy window and fail */
+        fprintf(stderr, "USER: WM_CREATE returned -1, destroying window\n");
+        user_window_destroy(wnd);
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
     EAX = wnd->hwnd;
     return STATUS_SUCCESS;
 }
@@ -757,14 +778,11 @@ ntstatus_t sys_NtUserDispatchMessage(void)
         return STATUS_SUCCESS;
     }
 
-    /* TODO: Actually call the window procedure via callback mechanism */
-    /* For now, we'll implement this in user_callback.c */
-    /* This is a placeholder that returns 0 */
+    /* Call the window procedure via callback mechanism */
+    uint32_t result = user_call_wndproc_addr(vm, wndproc, msg.hwnd,
+                                              msg.message, msg.wParam, msg.lParam);
 
-    printf("USER: NtUserDispatchMessage(hwnd=0x%X, msg=0x%X) - wndproc=0x%X\n",
-           msg.hwnd, msg.message, wndproc);
-
-    EAX = 0;
+    EAX = result;
     return STATUS_SUCCESS;
 }
 

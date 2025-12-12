@@ -312,6 +312,7 @@
 
 /* Special internal syscalls for VM control */
 #define WBOX_SYSCALL_DLL_INIT_DONE  0xFFFE  /* DLL entry point completed */
+#define WBOX_SYSCALL_WNDPROC_RETURN 0xFFFD  /* WndProc callback returned */
 
 /* Pseudo syscalls for heap function interception */
 #define WBOX_SYSCALL_HEAP_ALLOC    0xFFF0  /* RtlAllocateHeap */

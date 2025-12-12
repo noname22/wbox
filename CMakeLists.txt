@@ -147,6 +147,7 @@ set(VM_SOURCES
     src/user/user_window.c
     src/user/user_syscalls.c
     src/user/user_message.c
+    src/user/user_callback.c
 )
 
 # WBOX VM library
