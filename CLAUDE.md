@@ -81,3 +81,11 @@ Guest WND structures must match ReactOS layout exactly for `ValidateHwnd()` to w
 ## Reference code
 If reference code is available it's under ref. This includes:
 86Box  dosbox-x reactos  wine
+
+## Userland
+Reactos and winxp installations are available for testing under the userland directory.
+
+Example: run reactos calculator under with reactos userland:
+```
+build/wbox --gui -C: userland/reactos/ userland/reactos/reactos/system32/calc.exe
+```
