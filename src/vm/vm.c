@@ -539,8 +539,8 @@ void vm_start(vm_context_t *vm)
 
     /* Run until exit is requested */
     while (!vm->exit_requested) {
-        /* Execute some CPU cycles if we have a running thread */
-        if (!sched || (sched->current_thread && !sched->idle)) {
+        /* Execute some CPU cycles if we have a running thread (not idle thread) */
+        if (!sched || (sched->current_thread && !sched->current_thread->is_idle_thread)) {
             exec386(1000);
 
             /* Scheduler tick for preemption */
@@ -569,9 +569,15 @@ void vm_start(vm_context_t *vm)
             scheduler_check_timeouts(sched);
         }
 
-        /* If idle (no runnable threads), sleep briefly to avoid busy-waiting */
-        if (sched && sched->idle) {
-            usleep(1000);  /* 1ms idle sleep */
+        /* If idle thread is running, check if we can switch to a ready thread */
+        if (sched && sched->current_thread && sched->current_thread->is_idle_thread) {
+            if (sched->ready_head != NULL) {
+                /* Threads became ready (e.g., from timeout), switch to them */
+                scheduler_switch(sched);
+            } else {
+                /* No runnable threads, sleep briefly */
+                usleep(1000);  /* 1ms idle sleep */
+            }
         }
     }
 

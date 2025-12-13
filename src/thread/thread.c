@@ -503,3 +503,42 @@ wbox_thread_t *thread_get_current(void)
     }
     return NULL;
 }
+
+wbox_thread_t *thread_create_idle(void)
+{
+    wbox_thread_t *thread = calloc(1, sizeof(wbox_thread_t));
+    if (!thread) {
+        return NULL;
+    }
+
+    thread->thread_id = 0;  /* Idle thread is always TID 0 */
+    thread->process_id = 0;
+    thread->state = THREAD_STATE_READY;
+    thread->is_idle_thread = true;
+    thread->context_valid = false;
+
+    /* No stack, no TEB - this thread never executes guest code */
+    thread->stack_base = 0;
+    thread->stack_limit = 0;
+    thread->stack_size = 0;
+    thread->teb_addr = 0;
+
+    /* Scheduling */
+    thread->priority = -16;  /* Lowest possible priority */
+    thread->base_priority = -16;
+    thread->quantum = 0;
+    thread->quantum_reset = 0;
+
+    /* Not terminated */
+    thread->exit_code = 0;
+    thread->terminated = false;
+
+    /* No message queue */
+    thread->msg_queue = NULL;
+
+    /* Linked list */
+    thread->next = NULL;
+    thread->ready_next = NULL;
+
+    return thread;
+}

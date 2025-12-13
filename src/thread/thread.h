@@ -139,6 +139,9 @@ typedef struct wbox_thread {
     uint32_t exit_code;
     bool terminated;
 
+    /* Special thread flags */
+    bool is_idle_thread;                    /* True if this is the system idle thread */
+
     /* Linked list pointers */
     struct wbox_thread *next;           /* Next in all-threads list */
     struct wbox_thread *ready_next;     /* Next in ready queue */
@@ -218,5 +221,13 @@ uint32_t thread_get_current_id(void);
  * @return Current thread pointer or NULL
  */
 wbox_thread_t *thread_get_current(void);
+
+/*
+ * Create the system idle thread
+ * This thread never executes guest code - it signals that the scheduler
+ * should sleep because no other threads are ready.
+ * @return Idle thread or NULL on failure
+ */
+wbox_thread_t *thread_create_idle(void);
 
 #endif /* WBOX_THREAD_H */

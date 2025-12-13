@@ -4,6 +4,7 @@
 #include "scheduler.h"
 #include "thread.h"
 #include "../vm/vm.h"
+#include "../cpu/cpu.h"
 #include "../nt/sync.h"
 #include "../nt/handles.h"
 #include "../nt/syscalls.h"
@@ -43,10 +44,19 @@ int scheduler_init(wbox_scheduler_t *sched, struct vm_context *vm)
     sched->vm = vm;
     sched->next_thread_id = WBOX_THREAD_ID + 4;
 
+    /* Create system idle thread */
+    sched->idle_thread = thread_create_idle();
+    if (!sched->idle_thread) {
+        fprintf(stderr, "scheduler_init: Failed to create idle thread\n");
+        return -1;
+    }
+
     /* Create main thread from current CPU state */
     wbox_thread_t *main_thread = thread_create_main(vm);
     if (!main_thread) {
         fprintf(stderr, "scheduler_init: Failed to create main thread\n");
+        free(sched->idle_thread);
+        sched->idle_thread = NULL;
         return -1;
     }
 
@@ -63,7 +73,7 @@ int scheduler_init(wbox_scheduler_t *sched, struct vm_context *vm)
     /* Set global instance */
     scheduler_set_instance(sched);
 
-    printf("Scheduler initialized with main thread %u\n", main_thread->thread_id);
+    printf("Scheduler initialized with main thread %u and idle thread\n", main_thread->thread_id);
     return 0;
 }
 
@@ -79,6 +89,12 @@ void scheduler_cleanup(wbox_scheduler_t *sched)
         wbox_thread_t *next = thread->next;
         free(thread);
         thread = next;
+    }
+
+    /* Free idle thread (not in all_threads list) */
+    if (sched->idle_thread) {
+        free(sched->idle_thread);
+        sched->idle_thread = NULL;
     }
 
     sched->all_threads = NULL;
@@ -107,6 +123,10 @@ void scheduler_add_ready(wbox_scheduler_t *sched, wbox_thread_t *thread)
         sched->ready_tail = thread;
     }
 
+    /* If we were idle, clear the exit request since we now have work */
+    if (sched->idle) {
+        cpu_exit_requested = 0;
+    }
     sched->idle = false;
 }
 
@@ -191,9 +211,11 @@ void scheduler_switch(wbox_scheduler_t *sched)
     }
 
     if (!new_thread) {
-        /* No ready threads - go idle */
+        /* No ready threads - switch to idle thread */
         sched->idle = true;
-        sched->current_thread = NULL;
+        sched->current_thread = sched->idle_thread;
+        /* Signal CPU to exit exec386 so main loop can idle */
+        cpu_exit_requested = 1;
         return;
     }
 
@@ -227,6 +249,10 @@ void scheduler_check_timeouts(wbox_scheduler_t *sched)
             if (now >= thread->wait_timeout) {
                 /* Timeout expired */
                 thread->wait_status = STATUS_TIMEOUT;
+
+                /* Update saved context's EAX to return the wait result
+                 * (syscall return value is passed via EAX) */
+                thread->context.eax = STATUS_TIMEOUT;
 
                 /* Remove from wait lists */
                 for (int i = 0; i < thread->wait_count; i++) {
@@ -372,6 +398,16 @@ uint32_t scheduler_block_thread(wbox_scheduler_t *sched,
         }
     }
 
+    /* Save context before blocking - this is critical!
+     * scheduler_switch only saves context for RUNNING threads,
+     * so we must save it here before changing state to WAITING */
+    thread_save_context(thread);
+
+    /* Fix the saved EIP: during SYSENTER, cpu_state.pc points to the SYSENTER
+     * instruction itself. The correct return address is in EDX (per SYSENTER ABI).
+     * When we restore context, we want to return to user mode, not re-execute SYSENTER. */
+    thread->context.eip = EDX;
+
     /* Change thread state to waiting */
     thread->state = THREAD_STATE_WAITING;
 
@@ -467,6 +503,8 @@ void scheduler_signal_object(wbox_scheduler_t *sched, void *object, int type)
 
             /* Wake the thread */
             thread->wait_status = wait_status;
+            /* Update saved context's EAX to return the wait result */
+            thread->context.eax = wait_status;
             thread->wait_count = 0;
             thread->wait_timeout = 0;
             thread->state = THREAD_STATE_READY;

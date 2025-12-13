@@ -20,6 +20,7 @@ typedef struct wbox_scheduler {
     /* Thread lists */
     wbox_thread_t *all_threads;         /* Linked list of all threads */
     wbox_thread_t *current_thread;      /* Currently running thread */
+    wbox_thread_t *idle_thread;         /* System idle thread */
 
     /* Ready queue (FIFO within priority) */
     wbox_thread_t *ready_head;
