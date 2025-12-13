@@ -133,6 +133,7 @@
 #define PEB_IMAGE_SUBSYSTEM_MINOR    0x0BC /* ImageSubsystemMinorVersion */
 #define PEB_NUMBER_OF_PROCESSORS     0x64  /* NumberOfProcessors */
 #define PEB_NT_GLOBAL_FLAG           0x68  /* NtGlobalFlag */
+#define PEB_CRITICAL_SECTION_TIMEOUT 0x70  /* CriticalSectionTimeout (LARGE_INTEGER, 8 bytes) */
 #define PEB_SESSION_ID               0x1D4 /* SessionId */
 /* NLS Code Page Data (for string conversion functions) */
 #define PEB_ANSI_CODE_PAGE_DATA      0x58  /* AnsiCodePageData */

@@ -336,6 +336,22 @@ int loader_load_executable(loader_context_t *ctx, vm_context_t *vm,
             }
             mod = mod->next;
         }
+
+        /* Initialize RtlpTimeout in ntdll's BSS section.
+         * This variable is normally initialized by LdrpInitialize which copies
+         * PEB.CriticalSectionTimeout to RtlpTimeout. Since we don't run the full
+         * ntdll initialization, we need to set this manually.
+         * RVA 0x60768 is the location of RtlpTimeout in ReactOS ntdll.dll */
+        #define NTDLL_RTLP_TIMEOUT_RVA  0x60768
+        uint32_t rtlp_timeout_va = ntdll->base_va + NTDLL_RTLP_TIMEOUT_RVA;
+        uint32_t rtlp_timeout_phys = paging_get_phys(&vm->paging, rtlp_timeout_va);
+        if (rtlp_timeout_phys != 0) {
+            /* Same value as PEB.CriticalSectionTimeout: -1,500,000,000 (150 seconds)
+             * Stored as LARGE_INTEGER (8 bytes, little-endian) */
+            mem_writel_phys(rtlp_timeout_phys, 0xA697D100);      /* Low DWORD */
+            mem_writel_phys(rtlp_timeout_phys + 4, 0xFFFFFFFF);  /* High DWORD */
+            printf("Initialized RtlpTimeout at 0x%08X to 150 seconds\n", rtlp_timeout_va);
+        }
     }
 
     printf("\n=== Loading complete ===\n");

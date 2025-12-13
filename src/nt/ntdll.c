@@ -17,6 +17,7 @@
 #include "../thread/scheduler.h"
 
 #include <stdio.h>
+#include <stdbool.h>
 
 /*
  * Check if PC is in the loader stub region
@@ -121,14 +122,6 @@ int nt_syscall_handler(void)
 {
     uint32_t syscall_num = EAX;
     ntstatus_t result;
-
-    /* Debug: show all syscalls */
-    static int syscall_count = 0;
-    syscall_count++;
-    if (syscall_num >= 0x1000 && syscall_num < 0x1400) {
-        fprintf(stderr, "DEBUG[%d]: win32k syscall 0x%04X at PC=0x%08X\n",
-               syscall_count, syscall_num, cpu_state.pc);
-    }
 
     /* Dispatch to specific syscall handler */
     switch (syscall_num) {

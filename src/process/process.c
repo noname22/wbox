@@ -312,6 +312,13 @@ void process_init_peb(vm_context_t *vm)
     /* NtGlobalFlag = 0 */
     write_virt_l(vm, peb + PEB_NT_GLOBAL_FLAG, 0);
 
+    /* CriticalSectionTimeout = -1,500,000,000 (150 seconds in 100ns units, relative time)
+     * This is read by ntdll's LdrpInitialize to set RtlpTimeout.
+     * LARGE_INTEGER at offset 0x70, stored as little-endian 64-bit value.
+     * 150 * -10,000,000 = -1,500,000,000 = 0xFFFFFFFF_A697D100 */
+    write_virt_l(vm, peb + PEB_CRITICAL_SECTION_TIMEOUT, 0xA697D100);      /* Low DWORD */
+    write_virt_l(vm, peb + PEB_CRITICAL_SECTION_TIMEOUT + 4, 0xFFFFFFFF);  /* High DWORD */
+
     /* Session ID = 0 */
     write_virt_l(vm, peb + PEB_SESSION_ID, 0);
 

@@ -22,6 +22,7 @@
 #include "nt/vfs_jail.h"
 #include "loader/loader.h"
 #include "loader/module.h"
+#include "thread/scheduler.h"
 
 static void print_usage(const char *progname)
 {
@@ -252,6 +253,20 @@ int main(int argc, char *argv[])
 
     /* Install syscall handler */
     nt_install_syscall_handler();
+
+    /* Initialize scheduler before DLL initialization
+     * (DllMain may need to wait on synchronization objects) */
+    if (!vm.scheduler) {
+        wbox_scheduler_t *sched = calloc(1, sizeof(wbox_scheduler_t));
+        if (sched && scheduler_init(sched, &vm) == 0) {
+            vm.scheduler = sched;
+            scheduler_set_instance(sched);
+            printf("Scheduler initialized for DLL initialization\n");
+        } else {
+            free(sched);
+            fprintf(stderr, "Warning: Failed to initialize scheduler for DLL init\n");
+        }
+    }
 
     /* Initialize loaded DLLs (call DllMain for each) */
     printf("\nInitializing loaded DLLs...\n");
