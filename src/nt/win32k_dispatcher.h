@@ -71,6 +71,7 @@ ntstatus_t sys_NtGdiGetDCPoint(void);
 ntstatus_t sys_NtGdiSetBrushOrg(void);
 ntstatus_t sys_NtGdiHfontCreate(void);
 ntstatus_t sys_NtGdiExtGetObjectW(void);
+ntstatus_t sys_NtGdiGetDCObject(void);
 ntstatus_t sys_NtGdiFlush(void);
 ntstatus_t sys_NtGdiInit(void);
 

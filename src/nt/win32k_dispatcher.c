@@ -72,6 +72,32 @@ static void write_guest_dword(uint32_t guest_ptr, uint32_t value)
     }
 }
 
+static void write_guest_word(uint32_t guest_ptr, uint16_t value)
+{
+    if (!guest_ptr) return;
+
+    vm_context_t *vm = vm_get_context();
+    if (!vm) return;
+
+    uint32_t phys = paging_get_phys(&vm->paging, guest_ptr);
+    if (phys) {
+        mem_writew_phys(phys, value);
+    }
+}
+
+static void write_guest_byte(uint32_t guest_ptr, uint8_t value)
+{
+    if (!guest_ptr) return;
+
+    vm_context_t *vm = vm_get_context();
+    if (!vm) return;
+
+    uint32_t phys = paging_get_phys(&vm->paging, guest_ptr);
+    if (phys) {
+        mem_writeb_phys(phys, value);
+    }
+}
+
 /* Initialize win32k */
 int win32k_init(display_context_t *display)
 {
@@ -853,31 +879,194 @@ ntstatus_t sys_NtGdiExtGetObjectW(void)
         return STATUS_SUCCESS;
     }
 
-    /* Return size needed if buffer is NULL */
+    int size_needed = 0;
+    switch (type) {
+        case GDI_OBJ_PEN:
+            size_needed = 16;  /* sizeof(LOGPEN) */
+            break;
+        case GDI_OBJ_BRUSH:
+            size_needed = 12;  /* sizeof(LOGBRUSH) */
+            break;
+        case GDI_OBJ_FONT:
+            size_needed = 92;  /* sizeof(LOGFONTW) */
+            break;
+        case GDI_OBJ_BITMAP:
+            size_needed = 24;  /* sizeof(BITMAP) */
+            break;
+        case GDI_OBJ_PALETTE:
+            size_needed = 2;   /* sizeof(WORD) - palette entry count */
+            break;
+        default:
+            EAX = 0;
+            return STATUS_SUCCESS;
+    }
+
+    /* Return size if buffer is NULL */
     if (!buffer_ptr) {
-        switch (type) {
-            case GDI_OBJ_PEN:
-                EAX = 16;  /* LOGPEN size */
-                break;
-            case GDI_OBJ_BRUSH:
-                EAX = 12;  /* LOGBRUSH size */
-                break;
-            case GDI_OBJ_FONT:
-                EAX = 92;  /* LOGFONTW size */
-                break;
-            case GDI_OBJ_BITMAP:
-                EAX = 24;  /* BITMAP size */
-                break;
-            default:
-                EAX = 0;
-                break;
-        }
+        EAX = size_needed;
+        return STATUS_SUCCESS;
+    }
+
+    /* Clamp count to size needed */
+    if (count > size_needed)
+        count = size_needed;
+    if (count <= 0) {
+        EAX = 0;
         return STATUS_SUCCESS;
     }
 
     /* Fill buffer based on object type */
-    /* Simplified - just return success with minimal data */
-    EAX = count > 0 ? count : 0;
+    switch (type) {
+        case GDI_OBJ_PEN: {
+            gdi_pen_t *pen = (gdi_pen_t *)obj;
+            /*
+             * LOGPEN layout (16 bytes):
+             *   0: lopnStyle   (DWORD)
+             *   4: lopnWidth.x (LONG) - pen width
+             *   8: lopnWidth.y (LONG) - unused, always 0
+             *  12: lopnColor   (COLORREF)
+             */
+            if (count >= 4)  write_guest_dword(buffer_ptr + 0, pen->style);
+            if (count >= 8)  write_guest_dword(buffer_ptr + 4, pen->width);
+            if (count >= 12) write_guest_dword(buffer_ptr + 8, 0);
+            if (count >= 16) write_guest_dword(buffer_ptr + 12, pen->color);
+            break;
+        }
+        case GDI_OBJ_BRUSH: {
+            gdi_brush_t *brush = (gdi_brush_t *)obj;
+            /*
+             * LOGBRUSH layout (12 bytes):
+             *   0: lbStyle (UINT)
+             *   4: lbColor (COLORREF)
+             *   8: lbHatch (ULONG_PTR)
+             */
+            if (count >= 4)  write_guest_dword(buffer_ptr + 0, brush->style);
+            if (count >= 8)  write_guest_dword(buffer_ptr + 4, brush->color);
+            if (count >= 12) write_guest_dword(buffer_ptr + 8, brush->hatch_style);
+            break;
+        }
+        case GDI_OBJ_BITMAP: {
+            gdi_bitmap_t *bmp = (gdi_bitmap_t *)obj;
+            /*
+             * BITMAP layout (24 bytes):
+             *   0: bmType       (LONG) - always 0
+             *   4: bmWidth      (LONG)
+             *   8: bmHeight     (LONG)
+             *  12: bmWidthBytes (LONG) - row stride
+             *  16: bmPlanes     (WORD)
+             *  18: bmBitsPixel  (WORD)
+             *  20: bmBits       (LPVOID) - NULL for GetObject
+             */
+            if (count >= 4)  write_guest_dword(buffer_ptr + 0, 0);
+            if (count >= 8)  write_guest_dword(buffer_ptr + 4, bmp->width);
+            if (count >= 12) write_guest_dword(buffer_ptr + 8, bmp->height);
+            if (count >= 16) write_guest_dword(buffer_ptr + 12, bmp->pitch);
+            if (count >= 18) write_guest_word(buffer_ptr + 16, bmp->planes);
+            if (count >= 20) write_guest_word(buffer_ptr + 18, bmp->bits_per_pixel);
+            if (count >= 24) write_guest_dword(buffer_ptr + 20, 0);
+            break;
+        }
+        case GDI_OBJ_FONT: {
+            gdi_font_t *font = (gdi_font_t *)obj;
+            /*
+             * LOGFONTW layout (92 bytes):
+             *   0: lfHeight          (LONG)
+             *   4: lfWidth           (LONG)
+             *   8: lfEscapement      (LONG)
+             *  12: lfOrientation     (LONG)
+             *  16: lfWeight          (LONG)
+             *  20: lfItalic          (BYTE)
+             *  21: lfUnderline       (BYTE)
+             *  22: lfStrikeOut       (BYTE)
+             *  23: lfCharSet         (BYTE)
+             *  24: lfOutPrecision    (BYTE)
+             *  25: lfClipPrecision   (BYTE)
+             *  26: lfQuality         (BYTE)
+             *  27: lfPitchAndFamily  (BYTE)
+             *  28: lfFaceName[32]    (WCHAR) - 64 bytes
+             */
+            if (count >= 4)  write_guest_dword(buffer_ptr + 0, font->height);
+            if (count >= 8)  write_guest_dword(buffer_ptr + 4, font->width);
+            if (count >= 12) write_guest_dword(buffer_ptr + 8, font->escapement);
+            if (count >= 16) write_guest_dword(buffer_ptr + 12, font->orientation);
+            if (count >= 20) write_guest_dword(buffer_ptr + 16, font->weight);
+            if (count >= 21) write_guest_byte(buffer_ptr + 20, font->italic ? 1 : 0);
+            if (count >= 22) write_guest_byte(buffer_ptr + 21, font->underline ? 1 : 0);
+            if (count >= 23) write_guest_byte(buffer_ptr + 22, font->strikeout ? 1 : 0);
+            if (count >= 24) write_guest_byte(buffer_ptr + 23, font->char_set);
+            if (count >= 25) write_guest_byte(buffer_ptr + 24, 0);  /* OUT_DEFAULT_PRECIS */
+            if (count >= 26) write_guest_byte(buffer_ptr + 25, 0);  /* CLIP_DEFAULT_PRECIS */
+            if (count >= 27) write_guest_byte(buffer_ptr + 26, 0);  /* DEFAULT_QUALITY */
+            if (count >= 28) write_guest_byte(buffer_ptr + 27, font->pitch_and_family);
+            /* Face name: convert char to wchar_t */
+            if (count > 28) {
+                int max_chars = (count - 28) / 2;
+                if (max_chars > 32) max_chars = 32;
+                for (int i = 0; i < max_chars; i++) {
+                    uint16_t wch = (uint8_t)font->face_name[i];
+                    write_guest_word(buffer_ptr + 28 + i * 2, wch);
+                    if (wch == 0) break;
+                }
+            }
+            break;
+        }
+        case GDI_OBJ_PALETTE: {
+            gdi_palette_t *pal = (gdi_palette_t *)obj;
+            /* GetObject for palette returns just the entry count as a WORD */
+            if (count >= 2) write_guest_word(buffer_ptr, (uint16_t)pal->entry_count);
+            break;
+        }
+    }
+
+    EAX = count;
+    return STATUS_SUCCESS;
+}
+
+/* NtGdiGetDCObject - GetCurrentObject */
+ntstatus_t sys_NtGdiGetDCObject(void)
+{
+    uint32_t hdc = read_stack_arg(0);
+    int object_type = (int)read_stack_arg(1);
+
+    gdi_dc_t *dc = gdi_get_dc(&g_gdi_handles, hdc);
+    if (!dc) {
+        EAX = 0;
+        return STATUS_SUCCESS;
+    }
+
+    /*
+     * Object type constants (from wingdi.h):
+     *   OBJ_PEN     = 1
+     *   OBJ_BRUSH   = 2
+     *   OBJ_DC      = 3
+     *   OBJ_METADC  = 4
+     *   OBJ_PAL     = 5
+     *   OBJ_FONT    = 6
+     *   OBJ_BITMAP  = 7
+     */
+    uint32_t result = 0;
+    switch (object_type) {
+        case 1:  /* OBJ_PEN */
+            if (dc->pen) result = dc->pen->handle;
+            break;
+        case 2:  /* OBJ_BRUSH */
+            if (dc->brush) result = dc->brush->handle;
+            break;
+        case 5:  /* OBJ_PAL (palette) */
+            if (dc->palette) result = dc->palette->handle;
+            break;
+        case 6:  /* OBJ_FONT */
+            if (dc->font) result = dc->font->handle;
+            break;
+        case 7:  /* OBJ_BITMAP */
+            if (dc->bitmap) result = dc->bitmap->handle;
+            break;
+        default:
+            result = 0;
+            break;
+    }
+
+    EAX = result;
     return STATUS_SUCCESS;
 }
 
@@ -1205,6 +1394,8 @@ ntstatus_t win32k_syscall_dispatch(uint32_t syscall_num)
             return sys_NtGdiFillRgn();
         case NtGdiFlush - WIN32K_SYSCALL_BASE:
             return sys_NtGdiFlush();
+        case NtGdiGetDCObject - WIN32K_SYSCALL_BASE:
+            return sys_NtGdiGetDCObject();
         case NtGdiGetAndSetDCDword - WIN32K_SYSCALL_BASE:
             return sys_NtGdiGetAndSetDCDword();
         case NtGdiGetDeviceCaps - WIN32K_SYSCALL_BASE:
