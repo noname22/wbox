@@ -67,12 +67,14 @@ static void syscall_return(ntstatus_t status)
         return;
     }
 
-    /* Normal NT syscall - pop return address and jump there */
+    /*
+     * For KUSD syscalls: We must manually pop the return address and jump.
+     * The RET at KiFastSystemCallRet doesn't execute because our callback
+     * intercepts before normal SYSENTER processing.
+     */
     uint32_t return_addr = readmemll(ESP);
     ESP += 4;  /* Pop the return address */
     cpu_state.pc = return_addr;
-
-    /* Segment registers are already set for Ring 3 from VM setup */
 }
 
 /*
@@ -90,7 +92,7 @@ static void win32k_syscall_return(void)
         return;
     }
 
-    /* Read return address from user stack */
+    /* For KUSD syscalls: manually pop and jump (same as syscall_return) */
     uint32_t return_addr = readmemll(ESP);
     ESP += 4;  /* Pop the return address */
     cpu_state.pc = return_addr;

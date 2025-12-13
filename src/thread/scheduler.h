@@ -34,6 +34,7 @@ typedef struct wbox_scheduler {
     uint32_t context_switches;          /* Total context switches */
     bool idle;                          /* No runnable threads */
     bool preemption_pending;            /* Thread switch needed */
+    uint64_t time_offset;               /* Offset added to system time (for fast-forwarding) */
 
     /* VM reference */
     struct vm_context *vm;
@@ -74,6 +75,14 @@ void scheduler_switch(wbox_scheduler_t *sched);
  * @param sched Scheduler
  */
 void scheduler_check_timeouts(wbox_scheduler_t *sched);
+
+/*
+ * Advance the scheduler's virtual time
+ * Used to fast-forward through timeouts when idle
+ * @param sched Scheduler
+ * @param amount Amount to advance in 100ns units
+ */
+void scheduler_advance_time(wbox_scheduler_t *sched, uint64_t amount);
 
 /*
  * Add a thread to the ready queue

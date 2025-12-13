@@ -31,7 +31,20 @@ uint64_t scheduler_get_time_100ns(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 10000000ULL + (uint64_t)ts.tv_nsec / 100ULL;
+    uint64_t base_time = (uint64_t)ts.tv_sec * 10000000ULL + (uint64_t)ts.tv_nsec / 100ULL;
+
+    /* Add time offset if scheduler is available */
+    if (g_scheduler) {
+        return base_time + g_scheduler->time_offset;
+    }
+    return base_time;
+}
+
+void scheduler_advance_time(wbox_scheduler_t *sched, uint64_t amount)
+{
+    if (sched) {
+        sched->time_offset += amount;
+    }
 }
 
 int scheduler_init(wbox_scheduler_t *sched, struct vm_context *vm)
@@ -377,6 +390,28 @@ uint32_t scheduler_block_thread(wbox_scheduler_t *sched,
         return STATUS_TIMEOUT;
     }
 
+    /* Single-threaded optimization: If there's only one real thread (other than idle),
+     * waiting for an unsignaled object is impossible because no one can signal it.
+     * Instead of deadlocking or timing out, return SUCCESS immediately to simulate
+     * "another thread" signaling the event. This fixes critical section waits in
+     * single-threaded mode where ntdll expects multi-threaded behavior. */
+    int real_thread_count = 0;
+    for (wbox_thread_t *t = sched->all_threads; t; t = t->next) {
+        if (t != sched->idle_thread) {
+            real_thread_count++;
+        }
+    }
+    if (real_thread_count <= 1) {
+        /* Single-threaded mode - simulate immediate signal.
+         * For sync objects, "satisfy" the wait by decrementing signal state for auto-reset */
+        for (int i = 0; i < count; i++) {
+            if (objects[i]) {
+                sync_satisfy_wait((wbox_sync_object_t *)objects[i], current_thread_id);
+            }
+        }
+        return STATUS_WAIT_0;  /* Return as if first object was signaled */
+    }
+
     /* Set up wait blocks */
     thread->wait_count = count;
     thread->wait_type = wait_type;
@@ -403,18 +438,73 @@ uint32_t scheduler_block_thread(wbox_scheduler_t *sched,
      * so we must save it here before changing state to WAITING */
     thread_save_context(thread);
 
-    /* Fix the saved EIP: during SYSENTER, cpu_state.pc points to the SYSENTER
-     * instruction itself. The correct return address is in EDX (per SYSENTER ABI).
-     * When we restore context, we want to return to user mode, not re-execute SYSENTER. */
-    thread->context.eip = EDX;
+    /* Fix the saved EIP: After SYSENTER, cpu_state.pc points to the instruction
+     * AFTER SYSENTER (the RET at KiFastSystemCallRet). This is the correct
+     * return address. Note: EDX is the user stack pointer (set by MOV EDX, ESP
+     * before SYSENTER), NOT the return address! */
+    thread->context.eip = cpu_state.pc;
 
     /* Change thread state to waiting */
     thread->state = THREAD_STATE_WAITING;
 
-    /* Context switch to another thread */
+    /* Initialize wait_status to an invalid value so we know when it's been set */
+    thread->wait_status = 0xDEADBEEF;
+
+    /* Context switch to another thread.
+     * If no other threads are ready, scheduler_switch will set idle=true and return.
+     * In that case, we need to wait here until our timeout fires. */
     scheduler_switch(sched);
 
-    /* When we return here, the wait has been satisfied or timed out */
+    /* If we went idle (no other threads), we must wait for our timeout here.
+     * The caller's main loop will handle the idle state and check timeouts. */
+    int loop_count = 0;
+    while (thread->state == THREAD_STATE_WAITING && thread->wait_status == 0xDEADBEEF) {
+        loop_count++;
+
+        /* We're still waiting - check timeouts */
+        scheduler_check_timeouts(sched);
+
+        /* If still waiting and we have a timeout, fast-forward time */
+        if (thread->state == THREAD_STATE_WAITING && thread->wait_timeout != 0) {
+            uint64_t now = scheduler_get_time_100ns();
+            if (thread->wait_timeout > now) {
+                scheduler_advance_time(sched, thread->wait_timeout - now + 1);
+            }
+            scheduler_check_timeouts(sched);
+        }
+
+        /* If still waiting with no timeout, we're deadlocked */
+        if (thread->state == THREAD_STATE_WAITING && thread->wait_timeout == 0) {
+            fprintf(stderr, "scheduler_block_thread: DEADLOCK - infinite wait with no signal\n");
+            thread->wait_status = STATUS_TIMEOUT;
+            break;
+        }
+
+        /* Safety: prevent infinite loops */
+        if (loop_count > 100) {
+            fprintf(stderr, "scheduler_block_thread: SAFETY - breaking after 100 iterations\n");
+            thread->wait_status = STATUS_TIMEOUT;
+            thread->state = THREAD_STATE_READY;
+            break;
+        }
+    }
+
+    /* When we return here, the wait has been satisfied or timed out.
+     * We need to restore current_thread to the real thread that was waiting,
+     * because scheduler_switch may have set it to the idle thread while we
+     * were waiting. */
+    if (sched->current_thread != thread) {
+        sched->current_thread = thread;
+    }
+
+    /* Remove from ready queue if it was added there during timeout processing.
+     * Since we're returning directly to continue execution, the thread shouldn't
+     * be in the ready queue. */
+    scheduler_remove_ready(sched, thread);
+
+    thread->state = THREAD_STATE_RUNNING;
+    sched->idle = false;
+
     return thread->wait_status;
 }
 

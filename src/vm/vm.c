@@ -641,7 +641,55 @@ int vm_call_dll_entry(vm_context_t *vm, uint32_t entry_point, uint32_t base_va, 
     /* Run until DLL init done */
     int iter_count = 0;
     uint32_t last_esp = ESP;
+    wbox_scheduler_t *sched = (wbox_scheduler_t *)vm->scheduler;
     while (!vm->dll_init_done && !vm->exit_requested) {
+        /* Check if scheduler is idle (no runnable threads) */
+        if (sched && sched->idle) {
+            /* Check for timeout wakeups */
+            scheduler_check_timeouts(sched);
+
+            /* If still idle, try to fast-forward to the next timeout.
+             * During DLL init, waiting on a mutex/event that won't fire should
+             * timeout rather than deadlock. Find the next timeout and jump to it. */
+            if (sched->idle) {
+                uint64_t next_timeout = 0;
+                bool has_timeout = false;
+                for (wbox_thread_t *t = sched->all_threads; t; t = t->next) {
+                    if (t->state == THREAD_STATE_WAITING && t->wait_timeout != 0) {
+                        if (!has_timeout || t->wait_timeout < next_timeout) {
+                            next_timeout = t->wait_timeout;
+                            has_timeout = true;
+                        }
+                    }
+                }
+
+                if (has_timeout) {
+                    /* Fast-forward the scheduler clock to the timeout */
+                    uint64_t now = scheduler_get_time_100ns();
+                    if (next_timeout > now) {
+                        /* Actually advance time by setting the time offset */
+                        uint64_t advance = next_timeout - now + 1;
+                        scheduler_advance_time(sched, advance);
+                    }
+                    /* Now check timeouts again - this should wake the thread */
+                    scheduler_check_timeouts(sched);
+                }
+
+                if (sched->idle) {
+                    /* No threads with timeouts - truly deadlocked */
+                    fprintf(stderr, "DLL_ENTRY: DEADLOCK - scheduler idle, no timeouts\n");
+                    vm->exit_requested = 1;
+                    vm->exit_code = 0xDEAD;
+                    break;
+                }
+            }
+
+            /* A thread woke up - schedule it */
+            cpu_exit_requested = 0;
+            scheduler_switch(sched);
+            continue;
+        }
+
         /* For shell32, run one instruction at a time and trace */
         if (trace_enabled && iter_count < 100) {
             fprintf(stderr, "TRACE[%d]: EIP=0x%08X ESP=0x%08X EAX=0x%08X\n",
@@ -958,11 +1006,16 @@ int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
 
     /* Create syscall stub at offset 0x340 in KUSD page
      * This stub executes SYSENTER to enter kernel mode
-     * Code: 0F 34 (SYSENTER), C3 (RET) */
+     * Matches Windows KiFastSystemCall:
+     * Code: 89 E2 (MOV EDX, ESP), 0F 34 (SYSENTER), C3 (RET)
+     * MOV EDX, ESP is required because the kernel uses EDX to locate
+     * the user stack and read syscall arguments. */
     uint32_t syscall_stub_va = VM_KUSD_ADDR + 0x340;
-    mem_writeb_phys(kusd_phys + 0x340, 0x0F);  /* SYSENTER opcode byte 1 */
-    mem_writeb_phys(kusd_phys + 0x341, 0x34);  /* SYSENTER opcode byte 2 */
-    mem_writeb_phys(kusd_phys + 0x342, 0xC3);  /* RET */
+    mem_writeb_phys(kusd_phys + 0x340, 0x89);  /* MOV EDX, ESP opcode byte 1 */
+    mem_writeb_phys(kusd_phys + 0x341, 0xE2);  /* MOV EDX, ESP opcode byte 2 */
+    mem_writeb_phys(kusd_phys + 0x342, 0x0F);  /* SYSENTER opcode byte 1 */
+    mem_writeb_phys(kusd_phys + 0x343, 0x34);  /* SYSENTER opcode byte 2 */
+    mem_writeb_phys(kusd_phys + 0x344, 0xC3);  /* RET */
 
     /* Set SystemCall pointer at offset 0x300 to point to our stub */
     mem_writel_phys(kusd_phys + 0x300, syscall_stub_va);
@@ -987,10 +1040,13 @@ int vm_load_pe_with_dlls(vm_context_t *vm, const char *exe_path,
 
     /* Verify the memory was written correctly */
     uint32_t verify_syscall_ptr = mem_readl_phys(kusd_phys + 0x300);
-    uint8_t verify_sysenter0 = mem_readb_phys(kusd_phys + 0x340);
-    uint8_t verify_sysenter1 = mem_readb_phys(kusd_phys + 0x341);
+    uint8_t verify_mov0 = mem_readb_phys(kusd_phys + 0x340);
+    uint8_t verify_mov1 = mem_readb_phys(kusd_phys + 0x341);
+    uint8_t verify_sysenter0 = mem_readb_phys(kusd_phys + 0x342);
+    uint8_t verify_sysenter1 = mem_readb_phys(kusd_phys + 0x343);
     printf("  [DEBUG] @0x7FFE0300 = 0x%08X (expect 0x%08X)\n", verify_syscall_ptr, syscall_stub_va);
-    printf("  [DEBUG] @0x7FFE0340 = %02X %02X (expect 0F 34 for SYSENTER)\n", verify_sysenter0, verify_sysenter1);
+    printf("  [DEBUG] @0x7FFE0340 = %02X %02X %02X %02X (expect 89 E2 0F 34)\n",
+           verify_mov0, verify_mov1, verify_sysenter0, verify_sysenter1);
 
     return 0;
 }

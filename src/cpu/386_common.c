@@ -1817,11 +1817,13 @@ int
 sysenter(UNUSED(uint32_t fetchdat))
 {
     sysenter_stub_counter++;
-    /* Only show important syscalls to reduce noise */
-    if (EAX >= 0x1000 && EAX < 0x1400) {
-        printf("SYSENTER[%d]: EAX=0x%08X PC=0x%08X oldpc=0x%08X\n",
-               sysenter_stub_counter, EAX, cpu_state.pc, cpu_state.oldpc);
+
+    /* Debug: Check for suspicious syscall numbers */
+    if (EAX >= 0xFF00) {
+        fprintf(stderr, "[SYSENTER_SUSPICIOUS] EAX=0x%08X PC=0x%08X oldpc=0x%08X ESP=0x%08X\n",
+                EAX, cpu_state.pc, cpu_state.oldpc, ESP);
     }
+
     /* WBOX: Call syscall callback if registered */
     if (sysenter_callback) {
         return sysenter_callback();
