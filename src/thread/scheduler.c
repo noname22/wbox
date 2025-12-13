@@ -390,28 +390,6 @@ uint32_t scheduler_block_thread(wbox_scheduler_t *sched,
         return STATUS_TIMEOUT;
     }
 
-    /* Single-threaded optimization: If there's only one real thread (other than idle),
-     * waiting for an unsignaled object is impossible because no one can signal it.
-     * Instead of deadlocking or timing out, return SUCCESS immediately to simulate
-     * "another thread" signaling the event. This fixes critical section waits in
-     * single-threaded mode where ntdll expects multi-threaded behavior. */
-    int real_thread_count = 0;
-    for (wbox_thread_t *t = sched->all_threads; t; t = t->next) {
-        if (t != sched->idle_thread) {
-            real_thread_count++;
-        }
-    }
-    if (real_thread_count <= 1) {
-        /* Single-threaded mode - simulate immediate signal.
-         * For sync objects, "satisfy" the wait by decrementing signal state for auto-reset */
-        for (int i = 0; i < count; i++) {
-            if (objects[i]) {
-                sync_satisfy_wait((wbox_sync_object_t *)objects[i], current_thread_id);
-            }
-        }
-        return STATUS_WAIT_0;  /* Return as if first object was signaled */
-    }
-
     /* Set up wait blocks */
     thread->wait_count = count;
     thread->wait_type = wait_type;

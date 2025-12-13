@@ -352,6 +352,155 @@ int loader_load_executable(loader_context_t *ctx, vm_context_t *vm,
             mem_writel_phys(rtlp_timeout_phys + 4, 0xFFFFFFFF);  /* High DWORD */
             printf("Initialized RtlpTimeout at 0x%08X to 150 seconds\n", rtlp_timeout_va);
         }
+
+        /* Initialize RtlCriticalSectionLock and RtlpCritSectInitialized.
+         * These are found by disassembling RtlpInitDeferredCriticalSection in ntdll.dll:
+         *   movl $0x7c980fc4,(%esp)   ; RtlCriticalSectionLock at VA 0x7c980fc4
+         *   call RtlInitializeCriticalSectionEx
+         *   movb $0x1,0x7c980fc0      ; RtlpCritSectInitialized at VA 0x7c980fc0
+         *
+         * At ntdll ImageBase 0x7c920000:
+         *   RtlpCritSectInitialized RVA = 0x7c980fc0 - 0x7c920000 = 0x60fc0
+         *   RtlCriticalSectionLock RVA = 0x7c980fc4 - 0x7c920000 = 0x60fc4
+         *
+         * RTL_CRITICAL_SECTION structure (24 bytes):
+         *   +0: DebugInfo (NULL)
+         *   +4: LockCount (-1 = unlocked)
+         *   +8: RecursionCount (0)
+         *   +12: OwningThread (NULL)
+         *   +16: LockSemaphore (NULL)
+         *   +20: SpinCount (0)
+         */
+        #define NTDLL_RTLP_CRITSECT_INIT_RVA  0x60fc0
+        #define NTDLL_RTL_CRITSECT_LOCK_RVA   0x60fc4
+
+        uint32_t critsect_init_va = ntdll->base_va + NTDLL_RTLP_CRITSECT_INIT_RVA;
+        uint32_t critsect_lock_va = ntdll->base_va + NTDLL_RTL_CRITSECT_LOCK_RVA;
+        uint32_t critsect_init_phys = paging_get_phys(&vm->paging, critsect_init_va);
+        uint32_t critsect_lock_phys = paging_get_phys(&vm->paging, critsect_lock_va);
+
+        if (critsect_lock_phys != 0) {
+            /* Initialize RTL_CRITICAL_SECTION structure */
+            mem_writel_phys(critsect_lock_phys + 0, 0);           /* DebugInfo = NULL */
+            mem_writel_phys(critsect_lock_phys + 4, 0xFFFFFFFF);  /* LockCount = -1 (unlocked) */
+            mem_writel_phys(critsect_lock_phys + 8, 0);           /* RecursionCount = 0 */
+            mem_writel_phys(critsect_lock_phys + 12, 0);          /* OwningThread = NULL */
+            mem_writel_phys(critsect_lock_phys + 16, 0);          /* LockSemaphore = NULL */
+            mem_writel_phys(critsect_lock_phys + 20, 0);          /* SpinCount = 0 */
+            printf("Initialized RtlCriticalSectionLock at 0x%08X (LockCount=-1)\n", critsect_lock_va);
+        }
+        if (critsect_init_phys != 0) {
+            /* Mark critical section as initialized */
+            mem_writeb_phys(critsect_init_phys, 1);  /* RtlpCritSectInitialized = TRUE */
+            printf("Set RtlpCritSectInitialized at 0x%08X to TRUE\n", critsect_init_va);
+        }
+
+        /* Initialize LdrpLoaderLock - the loader's critical section.
+         * Found in LdrLockLoaderLock disassembly:
+         *   7c922d08: movl $0x7c96e010,(%esp)  ; push LdrpLoaderLock address
+         *   7c922d17: call RtlTryEnterCriticalSection
+         *
+         * At ntdll ImageBase 0x7c920000:
+         *   LdrpLoaderLock RVA = 0x7c96e010 - 0x7c920000 = 0x4e010
+         */
+        #define NTDLL_LDRP_LOADER_LOCK_RVA  0x4e010
+
+        uint32_t loader_lock_va = ntdll->base_va + NTDLL_LDRP_LOADER_LOCK_RVA;
+        uint32_t loader_lock_phys = paging_get_phys(&vm->paging, loader_lock_va);
+
+        if (loader_lock_phys != 0) {
+            /* Initialize RTL_CRITICAL_SECTION structure */
+            mem_writel_phys(loader_lock_phys + 0, 0);           /* DebugInfo = NULL */
+            mem_writel_phys(loader_lock_phys + 4, 0xFFFFFFFF);  /* LockCount = -1 (unlocked) */
+            mem_writel_phys(loader_lock_phys + 8, 0);           /* RecursionCount = 0 */
+            mem_writel_phys(loader_lock_phys + 12, 0);          /* OwningThread = NULL */
+            mem_writel_phys(loader_lock_phys + 16, 0);          /* LockSemaphore = NULL */
+            mem_writel_phys(loader_lock_phys + 20, 0);          /* SpinCount = 0 */
+            printf("Initialized LdrpLoaderLock at 0x%08X (LockCount=-1)\n", loader_lock_va);
+        }
+
+        /* Initialize vectored exception handler structures.
+         * Found in ntdll RtlAddVectoredExceptionHandler initialization code:
+         *
+         * List heads need to be initialized as empty LIST_ENTRYs (Flink=Blink=&self):
+         *   7c95c759: movl $0x7c981b20,0x7c981b24  ; RtlpVectoredExceptionHead.Blink = &Head
+         *   7c95c763: movl $0x7c981b20,0x7c981b20  ; RtlpVectoredExceptionHead.Flink = &Head
+         *   7c95c742: movl $0x7c981b28,0x7c981b2c  ; RtlpVectoredContinueHead.Blink = &Head
+         *   7c95c74c: movl $0x7c981b28,0x7c981b28  ; RtlpVectoredContinueHead.Flink = &Head
+         *
+         * At ntdll ImageBase 0x7c920000:
+         *   RtlpVectoredExceptionHead RVA = 0x7c981b20 - 0x7c920000 = 0x61b20
+         *   RtlpVectoredContinueHead RVA = 0x7c981b28 - 0x7c920000 = 0x61b28
+         *   RtlpVectoredHandlerLock RVA = 0x7c981b30 - 0x7c920000 = 0x61b30
+         */
+        #define NTDLL_RTLP_VEH_EXCEPTION_HEAD_RVA     0x61b20
+        #define NTDLL_RTLP_VEH_CONTINUE_HEAD_RVA      0x61b28
+        #define NTDLL_RTLP_VECTORED_HANDLER_LOCK_RVA  0x61b30
+
+        /* Initialize RtlpVectoredExceptionHead as empty LIST_ENTRY */
+        uint32_t veh_exception_va = ntdll->base_va + NTDLL_RTLP_VEH_EXCEPTION_HEAD_RVA;
+        uint32_t veh_exception_phys = paging_get_phys(&vm->paging, veh_exception_va);
+        if (veh_exception_phys != 0) {
+            /* Empty list: Flink = Blink = &self */
+            mem_writel_phys(veh_exception_phys + 0, veh_exception_va);  /* Flink = &self */
+            mem_writel_phys(veh_exception_phys + 4, veh_exception_va);  /* Blink = &self */
+            printf("Initialized RtlpVectoredExceptionHead at 0x%08X (empty list)\n", veh_exception_va);
+        }
+
+        /* Initialize RtlpVectoredContinueHead as empty LIST_ENTRY */
+        uint32_t veh_continue_va = ntdll->base_va + NTDLL_RTLP_VEH_CONTINUE_HEAD_RVA;
+        uint32_t veh_continue_phys = paging_get_phys(&vm->paging, veh_continue_va);
+        if (veh_continue_phys != 0) {
+            /* Empty list: Flink = Blink = &self */
+            mem_writel_phys(veh_continue_phys + 0, veh_continue_va);  /* Flink = &self */
+            mem_writel_phys(veh_continue_phys + 4, veh_continue_va);  /* Blink = &self */
+            printf("Initialized RtlpVectoredContinueHead at 0x%08X (empty list)\n", veh_continue_va);
+        }
+
+        /* Initialize RtlpVectoredHandlerLock critical section */
+        uint32_t veh_lock_va = ntdll->base_va + NTDLL_RTLP_VECTORED_HANDLER_LOCK_RVA;
+        uint32_t veh_lock_phys = paging_get_phys(&vm->paging, veh_lock_va);
+        if (veh_lock_phys != 0) {
+            /* Initialize RTL_CRITICAL_SECTION structure */
+            mem_writel_phys(veh_lock_phys + 0, 0);           /* DebugInfo = NULL */
+            mem_writel_phys(veh_lock_phys + 4, 0xFFFFFFFF);  /* LockCount = -1 (unlocked) */
+            mem_writel_phys(veh_lock_phys + 8, 0);           /* RecursionCount = 0 */
+            mem_writel_phys(veh_lock_phys + 12, 0);          /* OwningThread = NULL */
+            mem_writel_phys(veh_lock_phys + 16, 0);          /* LockSemaphore = NULL */
+            mem_writel_phys(veh_lock_phys + 20, 0);          /* SpinCount = 0 */
+            printf("Initialized RtlpVectoredHandlerLock at 0x%08X (LockCount=-1)\n", veh_lock_va);
+        }
+    }
+
+    /* Initialize kernel32.dll critical sections.
+     * These are normally initialized during DllMain but wbox may not run
+     * DllMain before the main executable starts using kernel32 functions.
+     *
+     * The critical section at RVA 0x7a020 is used by various kernel32 functions
+     * and causes deadlock if not initialized.
+     */
+    loaded_module_t *kernel32 = module_find_by_name(&ctx->modules, "kernel32.dll");
+    if (kernel32) {
+        /* Initialize the main kernel32 critical section at RVA 0x7a020
+         * Found in DllMain:
+         *   7c4f6426: movl $0x7c56a020,(%esp)  ; push CS address
+         *   7c4f6433: call *%esi              ; call RtlInitializeCriticalSection
+         */
+        #define KERNEL32_MAIN_CS_RVA  0x7a020
+
+        uint32_t k32_cs_va = kernel32->base_va + KERNEL32_MAIN_CS_RVA;
+        uint32_t k32_cs_phys = paging_get_phys(&vm->paging, k32_cs_va);
+
+        if (k32_cs_phys != 0) {
+            /* Initialize RTL_CRITICAL_SECTION structure */
+            mem_writel_phys(k32_cs_phys + 0, 0);           /* DebugInfo = NULL */
+            mem_writel_phys(k32_cs_phys + 4, 0xFFFFFFFF);  /* LockCount = -1 (unlocked) */
+            mem_writel_phys(k32_cs_phys + 8, 0);           /* RecursionCount = 0 */
+            mem_writel_phys(k32_cs_phys + 12, 0);          /* OwningThread = NULL */
+            mem_writel_phys(k32_cs_phys + 16, 0);          /* LockSemaphore = NULL */
+            mem_writel_phys(k32_cs_phys + 20, 0);          /* SpinCount = 0 */
+            printf("Initialized kernel32.dll critical section at 0x%08X (LockCount=-1)\n", k32_cs_va);
+        }
     }
 
     printf("\n=== Loading complete ===\n");
